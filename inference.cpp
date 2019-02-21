@@ -188,14 +188,14 @@ void read_layer(Layer &layer) {
 
 std::vector<Layer> read_bvlc_alexnet() {
     std::vector<Layer> network;
-    //network.emplace_back(Layer("bvlc_alexnet","conv1","conv",true,4,0));
-    //network.emplace_back(Layer("bvlc_alexnet","conv2","conv",true,1,2));
-    //network.emplace_back(Layer("bvlc_alexnet","conv3","conv",true,1,1));
-    //network.emplace_back(Layer("bvlc_alexnet","conv4","conv",true,1,1));
+    network.emplace_back(Layer("bvlc_alexnet","conv1","conv",true,4,0));
+    network.emplace_back(Layer("bvlc_alexnet","conv2","conv",true,1,2));
+    network.emplace_back(Layer("bvlc_alexnet","conv3","conv",true,1,1));
+    network.emplace_back(Layer("bvlc_alexnet","conv4","conv",true,1,1));
     network.emplace_back(Layer("bvlc_alexnet","conv5","conv",true,1,1));
-    //network.emplace_back(Layer("bvlc_alexnet","fc6","fc",true,1,0));
-    //network.emplace_back(Layer("bvlc_alexnet","fc7","fc",true,1,0));
-    //network.emplace_back(Layer("bvlc_alexnet","fc8","fc",false,1,0));
+    network.emplace_back(Layer("bvlc_alexnet","fc6","fc",true,1,0));
+    network.emplace_back(Layer("bvlc_alexnet","fc7","fc",true,1,0));
+    network.emplace_back(Layer("bvlc_alexnet","fc8","fc",false,1,0));
     return network;
 };
 
@@ -275,8 +275,6 @@ int main(int argc, char *argv[]) {
                                     for (int k = start_group; k < wgt_channels + start_group; k++) {
                                         sum += layer.act_get(n, k, stride * x + i, stride * y + j) *
                                                layer.wgt_get(m, k - start_group, i, j);
-                                        printf("Out_Act[%d][%d][%d][%d] += Act[%d][%d][%d][%d]*Wgt[%d][%d][%d][%d]\n",
-                                                n,m,x,y, n,k,stride * x + i,stride * y + j, m,k - start_group,i,j);
                                     }
                                 }
                             }

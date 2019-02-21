@@ -228,8 +228,8 @@ std::vector<Layer> read_bvlc_alexnet() {
     network.emplace_back(Layer("bvlc_alexnet","conv1","conv",true,4,0));
     network.emplace_back(Layer("bvlc_alexnet","conv2","conv",true,1,2));
     network.emplace_back(Layer("bvlc_alexnet","conv3","conv",true,1,1));
-    //network.emplace_back(Layer("bvlc_alexnet","conv4","conv",true,1,1));
-    //network.emplace_back(Layer("bvlc_alexnet","conv5","conv",true,1,1));
+    network.emplace_back(Layer("bvlc_alexnet","conv4","conv",true,1,1));
+    network.emplace_back(Layer("bvlc_alexnet","conv5","conv",true,1,1));
     //network.emplace_back(Layer("bvlc_alexnet","fc6","fc",true,1,0));
     //network.emplace_back(Layer("bvlc_alexnet","fc7","fc",true,1,0));
     //network.emplace_back(Layer("bvlc_alexnet","fc8","fc",false,1,0));
@@ -258,7 +258,7 @@ void check_values(const Layer &layer, const float* output_activations, float min
 
 // SCNN functions
 
-void computePE(int n, int ck, int ct, int W, int H, int K, int stride, const float* act_queue, const int* act_queue_x,
+void computePE(int n, int W, int H, int K, int stride, const float* act_queue, const int* act_queue_x,
         const int* act_queue_y, uint64_t act_queue_size, const float* wgt_queue, const int* wgt_queue_k,
         const int* wgt_queue_r, const int* wgt_queue_s, uint64_t wgt_queue_size, float* output_activations) {
 
@@ -283,8 +283,6 @@ void computePE(int n, int ck, int ct, int W, int H, int K, int stride, const flo
                     if(w >= 0 && w < W && h >= 0 && h < H) {
                         auto pos = n * W * H * K + k * W * H + w * H + h;
                         output_activations[pos] += act * wgt;
-                        //printf("Out_Act[%d][%d][%d][%d] += Act[%d][%d][%d][%d]*Wgt[%d][%d][%d][%d]\n",
-                        //       n,k,w,h, n,ct+ck,x,y, k,ck,r,s);
                     }
 
                 }
@@ -294,7 +292,7 @@ void computePE(int n, int ck, int ct, int W, int H, int K, int stride, const flo
     }
 }
 
-void computeTile(int n, int ct, int ck, int tw, int th, int X, int Y, int K, int W, int H, int R, int S,
+void computeTile(int n, int ct, int ck, int kc, int tw, int th, int Kc, int X, int Y, int K, int W, int H, int R, int S,
         const Layer &layer, float* output_activations) {
 
     int padding = layer.padding;
@@ -304,8 +302,8 @@ void computeTile(int n, int ct, int ck, int tw, int th, int X, int Y, int K, int
     for(int pex = 0; pex < Wt; pex++) {
         for(int pey = 0; pey < Ht; pey++) {
 
-            int x_begin = pex * tw, y_begin = pey * th, k_begin = 0;
-            int x_end = std::min(x_begin + tw, X), y_end = std::min(y_begin + th, Y), k_end = K;
+            int x_begin = pex * tw, y_begin = pey * th, k_begin = kc;
+            int x_end = std::min(x_begin + tw, X), y_end = std::min(y_begin + th, Y), k_end = k_begin + Kc;
 
             // Iterate strides
             for(int sx = 0; sx < stride; sx++) {
@@ -408,7 +406,7 @@ void computeTile(int n, int ct, int ck, int tw, int th, int X, int Y, int K, int
                         }
                     }
 
-                    computePE(n,ck,ct,W,H,K,stride,act_queue,act_queue_x,act_queue_y,act_queue_count,wgt_queue, wgt_queue_k,
+                    computePE(n,W,H,K,stride,act_queue,act_queue_x,act_queue_y,act_queue_count,wgt_queue, wgt_queue_k,
                             wgt_queue_r,wgt_queue_s, wgt_queue_count, output_activations);
 
                     free(act_queue);
@@ -455,6 +453,10 @@ int main(int argc, char *argv[]) {
         int W = (X - R)/stride + 1;
         int H = (Y - S)/stride + 1;
 
+        int groups = C / Ck;
+        int Kc = K / groups;
+        int kc = 0;
+
         X = (int)(ceil(X/(double)Wt))*Wt;
         Y = (int)(ceil(Y/(double)Ht))*Ht;
         auto tw = X/Wt;
@@ -490,8 +492,9 @@ int main(int argc, char *argv[]) {
         for(int n = 0; n < N; n++) {
             for(int ct = 0; ct < C; ct+=Ck) {
                 for(int ck = 0; ck < Ck; ck++) {
-                    computeTile(n,ct,ck,tw,th,X,Y,K,W,H,R,S,layer,output_activations);
+                    computeTile(n,ct,ck,kc,tw,th,Kc,X,Y,K,W,H,R,S,layer,output_activations);
                 }
+                kc += Kc;
             }
         }
 
