@@ -19,7 +19,6 @@ const int I = 4;
 const int F = 4;
 
 // Data structures
-
 struct Layer {
 
     std::string network = "";
@@ -170,6 +169,103 @@ struct Layer {
         act_shape.push_back((unsigned)Y);
 
     }
+
+    void act_split_4D(int K, int X, int Y) {
+
+        auto batch_size = act_shape[0];
+        auto act_channels = act_shape[1];
+        auto Nx = act_shape[2];
+        auto Ny = act_shape[3];
+
+        uint64_t new_max_index = batch_size * K * X * Y;
+        auto tmp_activations = (float *) malloc(new_max_index * sizeof(float));
+        if (tmp_activations == nullptr) {
+            fprintf(stderr, "Error: Failed to allocate padded activations!\n");
+            exit(EXIT_FAILURE);
+        }
+
+        for(int n = 0; n < batch_size; n++) {
+            for (int k = 0; k < act_channels; k++) {
+                for (int i = 0; i < Nx; i++) {
+                    for(int j = 0; j < Ny; j++) {
+                        auto new_k = k / (X*Y);
+                        auto rem = k % (X*Y);
+                        auto new_i = rem / Y;
+                        auto new_j = rem % Y;
+                        auto index_out = K*X*Y*n + X*Y*new_k + Y*new_i + new_j;
+                        auto index_in = act_channels*Nx*Ny*n + Nx*Ny*k + Ny*i + j;
+                        tmp_activations[index_out] = activations[index_in];
+                    }
+                }
+            }
+        }
+
+        free(activations);
+        activations = tmp_activations;
+        act_shape.clear();
+        act_shape.push_back(batch_size);
+        act_shape.push_back((unsigned)K);
+        act_shape.push_back((unsigned)X);
+        act_shape.push_back((unsigned)Y);
+
+    }
+
+    void wgt_split_4D(int K, int X, int Y) {
+
+        auto num_filters = wgt_shape[0];
+        auto wgt_channels = wgt_shape[1];
+        auto Kx = wgt_shape[2];
+        auto Ky = wgt_shape[3];
+
+        uint64_t new_max_index = num_filters * K * X * Y;
+        auto tmp_weights = (float *) malloc(new_max_index * sizeof(float));
+        if (tmp_weights == nullptr) {
+            fprintf(stderr, "Error: Failed to allocate padded weights!\n");
+            exit(EXIT_FAILURE);
+        }
+
+        for(int n = 0; n < num_filters; n++) {
+            for (int k = 0; k < wgt_channels; k++) {
+                for (int i = 0; i < Kx; i++) {
+                    for(int j = 0; j < Ky; j++) {
+                        auto new_k = k / (X*Y);
+                        auto rem = k % (X*Y);
+                        auto new_i = rem / Y;
+                        auto new_j = rem % Y;
+                        auto index_out = K*X*Y*n + X*Y*new_k + Y*new_i + new_j;
+                        auto index_in = wgt_channels*Kx*Ky*n + Kx*Ky*k + Ky*i + j;
+                        tmp_weights[index_out] = weights[index_in];
+                    }
+                }
+            }
+        }
+
+        free(weights);
+        weights = tmp_weights;
+        wgt_shape.clear();
+        wgt_shape.push_back(num_filters);
+        wgt_shape.push_back((unsigned)K);
+        wgt_shape.push_back((unsigned)X);
+        wgt_shape.push_back((unsigned)Y);
+
+    }
+
+    void reshape_to_2D() {
+
+        auto batch_size = act_shape[0];
+        auto act_channels = act_shape[1];
+        auto Nx = act_shape[2];
+        auto Ny = act_shape[3];
+        auto new_act_channels = act_channels * Nx * Ny;
+
+        act_shape.clear();
+        act_shape.push_back(batch_size);
+        act_shape.push_back(new_act_channels);
+        act_shape.push_back(1);
+        act_shape.push_back(1);
+
+    }
+
 };
 
 // Read network from numpy arrays
@@ -230,9 +326,9 @@ std::vector<Layer> read_bvlc_alexnet() {
     network.emplace_back(Layer("bvlc_alexnet","conv3","conv",true,1,1));
     network.emplace_back(Layer("bvlc_alexnet","conv4","conv",true,1,1));
     network.emplace_back(Layer("bvlc_alexnet","conv5","conv",true,1,1));
-    //network.emplace_back(Layer("bvlc_alexnet","fc6","fc",true,1,0));
-    //network.emplace_back(Layer("bvlc_alexnet","fc7","fc",true,1,0));
-    //network.emplace_back(Layer("bvlc_alexnet","fc8","fc",false,1,0));
+    network.emplace_back(Layer("bvlc_alexnet","fc6","fc",true,1,0));
+    network.emplace_back(Layer("bvlc_alexnet","fc7","fc",true,1,0));
+    network.emplace_back(Layer("bvlc_alexnet","fc8","fc",false,1,0));
     return network;
 };
 
@@ -436,6 +532,15 @@ int main(int argc, char *argv[]) {
     for(auto layer : network) {
 
         read_layer(layer);
+
+        if(layer.type == "fc") {
+            layer.reshape_to_2D();
+            auto C = layer.act_shape[1];
+            layer.act_split_4D((unsigned)(C / 256), 16, 16);
+
+            auto Ck = layer.wgt_shape[1];
+            layer.wgt_split_4D((unsigned)(Ck / 256), 16, 16);
+        }
 
         layer.zero_pad();
         int N = (int) layer.act_shape[0];
