@@ -1,4 +1,6 @@
-
+#include "tensor.h"
+#include "layer.h"
+#include <cmath>
 
 std::vector<Layer> read_bvlc_alexnet() {
     std::vector<Layer> network;
@@ -12,3 +14,18 @@ std::vector<Layer> read_bvlc_alexnet() {
     network.emplace_back(Layer("bvlc_alexnet","fc8","fc",false,1,0));
     return network;
 };
+
+// MAIN
+
+int main(int argc, char *argv[]) {
+
+    auto network = read_bvlc_alexnet();
+
+    for(auto layer : network) {
+
+        read_layer(layer);
+
+        }
+
+return 0;
+}
