@@ -1,5 +1,4 @@
-#include "tensor.h"
-#include "layer.h"
+#include "Layer.h"
 #include <cmath>
 
 // Constants
@@ -91,7 +90,7 @@ void computePE(int n, int W, int K, int stride, const float* h_act_queue,, const
     int* d_wgt_queue_s = host2Dev(wgt_queue_size, h_wgt_queue_s);
    
     float* d_output_activations;
-    check_error(cudaMalloc((void**) &d_output_activations, size*sizeof(float)));
+    check_error(cudaMalloc((void**) &d_output_activations, N * K * W * H * sizeof(float)));
 
     dim3 block(1024, 1);
     dim3 grid((act_queue_size+block.x-1)/block.x,1);
@@ -99,7 +98,44 @@ void computePE(int n, int W, int K, int stride, const float* h_act_queue,, const
     //TODO: add streams
     kComputePE<<<grid,block>>>(n,W,K,stride,d_act_queue,d_act_queue_x,d_act_queue_y,act_queue_size,d_wgt_queue,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,wgt_queue_size,d_output_activations);
 
-    cudaDeviceSynchronize(); 
+    cudaDeviceSynchronize();
+
+    //copy output activations back to host
+    //FIX: no need to copy the whole output activations each time
+    cudaMemcpy(h_output_activations, d_output_activations, N * K * W * H * sizeof(float), cudaMemcpyDeviceToHost);
+
+    //free GPU resources
+    cudaFree(d_act_queue); 
+    cudaFree(d_act_queue_x); 
+    cudaFree(d_act_queue_y); 
+    cudaFree(d_wgt_queue); 
+    cudaFree(d_wgt_queue_k); 
+    cudaFree(d_wgt_queue_r); 
+    cudaFree(d_wgt_queue_s);
+    cudaFree(d_output_activations);
+}
+
+__global__ void kAddBias(const int N, const int K, const int W, const int H, float* d_output_activations, const Layer* layer){
+
+    int n = threadIdx.x + blockIdx.x*blockDim.x;
+    int k = threadIdx.y + blockIdx.y*blockDim.y;
+
+    if(n < N && k < K){
+        for(int w =0; w < W; w++){
+            for(int h=0; h<H; h++){
+                int pos = n * W * H * K + k * W * H + w * H + h;
+                d_output_activations[pos] = layer.bias[k];
+            }
+        }
+    }
+}
+
+void addBias(const int N, const int K, const int W, const int H, float* d_output_activations, Layer* layer){
+
+    dim3 block(32, 32);
+    dim3 grid((N+block.x-1)/block.x,(K+block.y-1)/block.y);
+    kAddBias<<<grid, block>>>(N,K,W,H,d_output_activations,layer);
+    cudaDeviceSynchronize();
 }
 
 // MAIN
