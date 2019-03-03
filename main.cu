@@ -115,6 +115,7 @@ void computePE(int n, int W, int K, int stride, const float* h_act_queue,, const
     cudaFree(d_output_activations);
 }
 
+//naive implementation
 __global__ void kAddBias(const int N, const int K, const int W, const int H, float* d_output_activations, const Layer* layer){
 
     int n = threadIdx.x + blockIdx.x*blockDim.x;
@@ -136,6 +137,25 @@ void addBias(const int N, const int K, const int W, const int H, float* d_output
     dim3 grid((N+block.x-1)/block.x,(K+block.y-1)/block.y);
     kAddBias<<<grid, block>>>(N,K,W,H,d_output_activations,layer);
     cudaDeviceSynchronize();
+}
+
+__global__ void kRelu(const int N, const int K, const int W, const int H, float* d_output_activations, Layer* layer){
+    
+    int x = threadIdx.x + blockIdx.x*blockDim.x;
+
+    if(x < N*K*W*H){
+        d_output_activations[x] = (d_output_activations[x] > 0)? d_output_activations[x] : 0;
+    }
+}
+
+void relu(const int N, const int K, const int W, const int H, float* d_output_activations, Layer* layer){
+    
+    if(layer.ReLU){
+        dim3 block(1024, 1);
+        dim3 grid((N*K*W*H+block.x-1)/block.x,1);
+        kRelu<<<grid,block>>>(N,K,W,H,d_output_activations,layer);
+        cudaDeviceSynchronize();
+    }
 }
 
 // MAIN
