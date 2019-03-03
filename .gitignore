@@ -40,3 +40,6 @@ cmake-*
 models
 net_traces
 results
+
+tensor.cu
+tensor.h

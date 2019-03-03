@@ -9,8 +9,8 @@ struct tensor {
 	int col;
 	float *data;
 
-	tensor(int row, int col, float *d_data);
-	tensor(int row, int col, float **h_data);
+	tensor(int size, float *d_data);
+	tensor(int size, float **h_data);
 	~tensor();
 
 	float* getDevData();
