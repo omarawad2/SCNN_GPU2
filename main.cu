@@ -1,5 +1,7 @@
+
 #include "Layer.h"
 #include <cmath>
+#include <chrono>
 
 // Constants
 
@@ -42,10 +44,11 @@ cudaError_t check_error(cudaError_t err, std::string task) {
 }
 
 template <typename T>
-T* host2Dev(uint64_t size, T *h_data, std::string task){
+T* host2Dev(uint64_t size, const T *h_data, std::string task){
     T* d_data;
     check_error(cudaMalloc((void**) &d_data, size*sizeof(T)),task);
     cudaMemcpy(d_data, h_data, size*sizeof(T), cudaMemcpyHostToDevice);
+    return d_data;
 }
 
 // Checking function
@@ -112,11 +115,11 @@ __global__ void kComputePE(int n, int W, int H, int K, int stride, const float* 
             float s = d_wgt_queue_s[ff];
 
             //TODO: try to remove div. (takes a lot on GPU)
-            int w = (x-r) >> stride;//(x-r)/stride;
-            int h = (y-s) >> stride;//(y-s)/stride;
+            int w = (x-r)/stride;
+            int h = (y-s)/stride;
 
              if(w >= 0 && w < W && h >= 0 && h < H) {
-                auto pos = n * W * H * K + k * W * H + w * H + h;
+                uint32_t pos = n * W * H * K + k * W * H + w * H + h;
                 //TODO: memory access not coalesced
                 d_output_activations[pos] += act * wgt;
             }
@@ -126,11 +129,11 @@ __global__ void kComputePE(int n, int W, int H, int K, int stride, const float* 
 
 //############################################### CPU SCNN #############################################################
 
-void addBias(const int N, const int K, const int W, const int H, const Layer* layer, float* d_output_activations) {
+void addBias(const int N, const int K, const int W, const int H, const Layer &layer, float* d_output_activations) {
 
 	std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 
-	auto bytes = layer.getMaxIndex("Bias") * sizeof(float);
+	auto bytes = layer.getMaxIndex("bias") * sizeof(float);
 	float* d_bias = host2Dev(bytes, layer.bias,"allocate device bias");
 
     dim3 block(32, 32);
@@ -144,11 +147,10 @@ void addBias(const int N, const int K, const int W, const int H, const Layer* la
     std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
 
-    printf("kAddBias time %.6f\n",time_span);
+    printf("kAddBias time %.6f\n",time_span.count());
 }
 
-void relu(const int N, const int K, const int W, const int H, float* h_output_activations, \
-		float *d_output_activations) {
+void relu(const int N, const int K, const int W, const int H, const Layer &layer, float *d_output_activations) {
 
 	std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
     
@@ -162,10 +164,10 @@ void relu(const int N, const int K, const int W, const int H, float* h_output_ac
     std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
 
-    printf("kRelu time %.6f\n",time_span);
+    printf("kRelu time %.6f\n",time_span.count());
 }
 
-void computePE(int n, int W, int K, int stride, const float* h_act_queue,, const int* h_act_queue_x,
+void computePE(int n, int W, int H, int K, int stride, const float* h_act_queue, const int* h_act_queue_x,
         const int* h_act_queue_y, uint64_t act_queue_size, const float* h_wgt_queue, const int* h_wgt_queue_k,
         const int* h_wgt_queue_r, const int* h_wgt_queue_s, uint64_t wgt_queue_size, float* d_output_activations) {
 
@@ -188,7 +190,7 @@ void computePE(int n, int W, int K, int stride, const float* h_act_queue,, const
     dim3 grid((act_queue_size+block.x-1)/block.x,1);
 
     //TODO: add streams
-    kComputePE<<<grid,block>>>(n,W,K,stride/2,d_act_queue,d_act_queue_x,d_act_queue_y,act_queue_size,d_wgt_queue,
+    kComputePE<<<grid,block>>>(n,W,H,K,stride/2,d_act_queue,d_act_queue_x,d_act_queue_y,act_queue_size,d_wgt_queue,
     	d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,wgt_queue_size,d_output_activations);
 
     cudaDeviceSynchronize();
@@ -257,25 +259,25 @@ int main(int argc, char *argv[]) {
         uint32_t bytes = N*K*W*H * sizeof(float);
 
         float* d_output_activations;
-        checkCuda(cudaMalloc((void **) &d_output_activations, bytes),"allocate device output activations");
+        check_error(cudaMalloc((void **) &d_output_activations, bytes),"allocate device output activations");
 
-        addBias(N, K, W, H, d_output_activations, layer);
+        addBias(N, K, W, H, layer, d_output_activations);
 
         // TODO: core compute
 
-        relu(N, K, W, H, d_output_activations);
+        relu(N, K, W, H, layer, d_output_activations);
 
         auto h_output_activations = (float *) malloc(bytes);
-        if (output_activations == nullptr) {
+        if (h_output_activations == nullptr) {
             fprintf(stderr, "Error: Failed to allocate output activations!\n");
             exit(EXIT_FAILURE);
         }
 
-        checkCuda(cudaMemcpy(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost),
+        check_error(cudaMemcpy(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost),
         		"copy output activations from device to host");
 
-        check_values(layer,output_activations);
-        free(output_activations);
+        check_values(layer,h_output_activations);
+        free(h_output_activations);
 
         }
 

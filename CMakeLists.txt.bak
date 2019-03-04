@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.1)
 project(
         SCNN_GPU
         VERSION 1.0.0
-        LANGUAGES CXX CUDA
+        LANGUAGES CXX
 )
 
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
@@ -22,25 +22,14 @@ add_executable(
         ${PROJECT_NAME}
         cnpy.h
         cnpy.cpp
-        Layer.h
-        Layer.cpp
-        main.cu
+        scnn_cpu.cpp
 )
-
-target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_11)
 
 set_target_properties(
         ${PROJECT_NAME} PROPERTIES
-        CUDA_SEPARABLE_COMPILATION ON
+        CXX_STANDARD 14
+        CXX_STANDARD_REQUIRED ON
+        COMPILE_FLAGS "${WARNING_FLAGS}"
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin
+        LINKER_LANGUAGE CXX
 )
-
-set_property(TARGET ${PROJECT_NAME}
-        PROPERTY CUDA_SEPARABLE_COMPILATION ON)
-
-if(APPLE)
-    # We need to add the path to the driver (libcuda.dylib) as an rpath,
-    # so that the static cuda runtime can find it at runtime.
-    set_property(TARGET ${PROJECT_NAME}
-            PROPERTY
-            BUILD_RPATH ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
-endif()
