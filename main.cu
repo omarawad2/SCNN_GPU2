@@ -136,7 +136,7 @@ __global__ void kComputePE(int n, int W, int H, int K, int stride, const float* 
 }
 
 //naive implementation
-__global__ void kCount_effectual_activations(int n, int channels, int sx, int sy, int X, int Y, int stride, const Layer &d_layer, uint64_t &d_queue_count){
+__global__ void kCount_effectual_activations(int n, int channels, int sx, int sy, int X, int Y, int stride, const Layer &d_layer, uint64_t &d_act_queue_count, float* d_act_queue, int* d_act_queue_x, int* d_act_queue_y, bool populate){
 
     int x = threadIdx.x + blockIdx.x*blockDim.x;
     int y = threadIdx.y + blockIdx.y*blockDim.y;
@@ -146,13 +146,23 @@ __global__ void kCount_effectual_activations(int n, int channels, int sx, int sy
         if(y < Y){
             int tmp_sy = y % stride;
             float act_bits = d_layer.act_get(n,channels,x,y);
-            if(act_bits !=0 && sx == tmp_sx && sy == tmp_sy) d_queue_count++;
+            if(act_bits !=0 && sx == tmp_sx && sy == tmp_sy){
+                if(populate){
+                    int index = x+y*X;
+                    d_act_queue[index] = act_bits;
+                    d_act_queue_x[index] = x;
+                    d_act_queue_y[index] = y;
+                }    
+                 else {
+                    d_act_queue_count++;
+                }
+            } 
         }
     }
 }
 
 //naive implementation
-__global__ void kCount_effectual_weights(int ck, int sx, int sy, int R, int S, int k_end, int ck, int stride, int padding, const Layer &d_layer, uint64_t &d_queue_count){
+__global__ void kCount_effectual_weights(int ck, int sx, int sy, int R, int S, int k_end, int ck, int stride, int padding, const Layer &d_layer, uint64_t &d_wgt_queue_count, float* d_wgt_queue, int* d_wgt_queue_k, int* d_wgt_queue_r, int* d_wgt_queue_s, bool populate){
     
     int r = threadIdx.x + blockIdx.x*blockDim.x;
     int s = threadIdx.y + blockIdx.y*blockDim.y;
@@ -164,7 +174,17 @@ __global__ void kCount_effectual_weights(int ck, int sx, int sy, int R, int S, i
             int tmp_sy = (s + padding) % stride;
             if(k < k_end){
                 float wgt_bits = d_layer.wgt_get(k,ck,r,s);
-                if(wgt_bits != 0 && sx == tmp_sx && sy == tmp_sy) d_queue_count++;
+                if(wgt_bits != 0 && sx == tmp_sx && sy == tmp_sy){
+                    if(populate){
+                        int index = r+s*R+k*R*S;
+                        d_wgt_queue[index] = wgt_bits;
+                        d_wgt_queue_k[index] = k;
+                        d_wgt_queue_r[index] = r;
+                        d_wgt_queue_s[index] = s;
+                    } else {
+                        d_queue_count++; 
+                    }
+                }
             }
         }
     }
@@ -194,7 +214,7 @@ void addBias(int N, int K, int W, int H, float* d_output_activations, const Laye
 }
 
 void relu(int N, int K, int W, int H, float* h_output_activations, const Layer &d_layer) {
-    
+
 	std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
     
     if(d_layer.ReLU){
@@ -211,10 +231,10 @@ void relu(int N, int K, int W, int H, float* h_output_activations, const Layer &
     printf("kRelu time %.6f\n",time_span.count());
 }
 
-void computePE(int n, int W, int H, int K, int stride, const float* h_act_queue, const int* h_act_queue_x,
-        const int* h_act_queue_y, uint64_t act_queue_size, const float* h_wgt_queue, const int* h_wgt_queue_k,
-        const int* h_wgt_queue_r, const int* h_wgt_queue_s, uint64_t wgt_queue_size, float* d_output_activations) {
-
+void computePE(int n, int W, int H, int K, int stride, const float* d_act_queue, const int* d_act_queue_x,
+        const int* d_act_queue_y, uint64_t act_queue_size, const float* d_wgt_queue, const int* d_wgt_queue_k,
+        const int* d_wgt_queue_r, const int* d_wgt_queue_s, uint64_t wgt_queue_size, float* d_output_activations) {
+/*
     //TODO: overlap mem. transfer
     float* d_act_queue = host2Dev(act_queue_size, h_act_queue,"allocate device activations queue");
     int* d_act_queue_x = host2Dev(act_queue_size, h_act_queue_x,"allocate device activations queue X dim");
@@ -223,7 +243,7 @@ void computePE(int n, int W, int H, int K, int stride, const float* h_act_queue,
     int* d_wgt_queue_k = host2Dev(wgt_queue_size, h_wgt_queue_k,"allocate device weights queue K filter");
     int* d_wgt_queue_r = host2Dev(wgt_queue_size, h_wgt_queue_r,"allocate device weights queue R dim");
     int* d_wgt_queue_s = host2Dev(wgt_queue_size, h_wgt_queue_s,"allocate device weights queue S dim");
-
+*/
    	// I think that for now we can allocate just once at the begining, since the networks are smaller than 300MB
    	// We can change that in the future though
     //float* d_output_activations;
@@ -242,7 +262,7 @@ void computePE(int n, int W, int H, int K, int stride, const float* h_act_queue,
     //copy output activations back to host
     //FIX: no need to copy the whole output activations each time
     //cudaMemcpy(h_output_activations, d_output_activations, N * K * W * H * sizeof(float), cudaMemcpyDeviceToHost);
-
+/*
     //free GPU resources
     check_error(cudaFree(d_act_queue),"free device activations queue"); 
     check_error(cudaFree(d_act_queue_x),"free device activations queue X dim"); 
@@ -252,24 +272,25 @@ void computePE(int n, int W, int H, int K, int stride, const float* h_act_queue,
     check_error(cudaFree(d_wgt_queue_r),"free device weights queue R dim"); 
     check_error(cudaFree(d_wgt_queue_s),"free device weights queue S dim");
     //check_error(cudaFree(d_output_activations),"free device output activations");
+*/
 }
 
 
-void count_effectual_weights(int ck, int sx, int sy, int R, int S, int k_end, int ck, int stride, int padding, const Layer &d_layer, uint64_t &d_queue_count){
+void count_effectual_weights(int ck, int sx, int sy, int R, int S, int k_end, int ck, int stride, int padding, const Layer &d_layer, uint64_t &d_wgt_queue_count, float* d_wgt_queue, int* d_wgt_queue_k, int* d_wgt_queue_r, int* d_wgt_queue_s, bool populate){
 
     dim3 block(16, 16, 4);
     dim3 grid((R+block.x-1)/block.x,(S+block.y-1)/block.y,(k_end+block.z-1)/block.z);
     //TODO:add streams 
-    kCount_effectual_weights<<<grid,block>>>(ck,sx,sy,R,S,k_end,ck,stride,padding,d_layer,d_queue_count);
+    kCount_effectual_weights<<<grid,block>>>(ck,sx,sy,R,S,k_end,ck,stride,padding,d_layer,d_wgt_queue_count,d_wgt_queue_k,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,populate);
     cudaDeviceSynchronize();
 }
 
-void count_effectual_activations(int n, int channels, int sx, int sy, int X, int Y, int stride, const Layer &d_layer, uint64_t &d_queue_count){
+void count_effectual_activations(int n, int channels, int sx, int sy, int X, int Y, int stride, const Layer &d_layer, uint64_t &d_act_queue_count, float* d_act_queue, int* d_act_queue_x, int* d_act_queue_y, bool populate){
      
      dim3 block(32, 32);
      dim3 grid((X+block.x-1)/block.x,(Y+block.y-1)/block.y);
      //TODO:add streams 
-     kCount_effectual<<<grid, block>>>(n,channels,sx,sy,X,Y,stide,d_layer,d_queue_count);
+     kCount_effectual<<<grid, block>>>(n,channels,sx,sy,X,Y,stide,d_layer,d_act_queue_count, d_act_queue, d_act_queue_x, d_act_queue_y, populate);
      cudaDeviceSynchronize();
 }
 
@@ -288,6 +309,9 @@ R: weights window x-dimension
 S: weights window y-dimension
 */
 void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int W, int H, int R, int S, const Layer &layer, float* h_output_activations){
+
+    std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
+
     int padding = layer.padding;
     int stride = layer.stride;
 
@@ -296,20 +320,50 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
     for(int sx = 0; sx < stride; sx++){
         for(int sy = 0; sy < stride; sy++){
     
+            float* d_act_queue, d_act_queue_x, d_act_queue_y, d_wgt_queue, d_wgt_queue_k, d_wgt_queue_r, d_wgt_queue_s;
+
             // Count number of effectual activations
             uint64_t act_queue_count = 0;
-            count_effectual_activations(n,ct+ck,sx,sy,X,Y,stride,d_layer,act_queue_count);
+            count_effectual_activations(n,ct+ck,sx,sy,X,Y,stride,d_layer,act_queue_count,d_act_queue,d_act_queue_x,d_act_queue_y,0);
            
             // Count number of effectual weights
             uint64_t wgt_queue_count = 0;
-            count_effectual_weights(ck,sx,sy,R,S,kc+Kc,ck,stride,padding,d_layer,wgt_queue_count);
+            count_effectual_weights(ck,sx,sy,R,S,kc+Kc,ck,stride,padding,d_layer,wgt_queue_count,d_wgt_queue,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,0);
 
-            // Allocate space for the queues
+            // Allocate space for the queues on device
+            check_error(cudaMalloc((void**) &d_act_queue, act_queue_count*sizeof(float)),"allocate device activations queue");
+            check_error(cudaMalloc((void**) &d_act_queue_x, act_queue_count*sizeof(int)),"allocate device activations queue X dim");
+            check_error(cudaMalloc((void**) &d_act_queue_y, act_queue_count*sizeof(int)),"allocate device activations queue Y dim");
+            check_error(cudaMalloc((void**) &d_wgt_queue, wgt_queue_count*sizeof(float)),"allocate device weights queue");
+            check_error(cudaMalloc((void**) &d_wgt_queue_k, wgt_queue_count*sizeof(int)),"allocate device weights queue K filter");
+            check_error(cudaMalloc((void**) &d_wgt_queue_r, wgt_queue_count*sizeof(int)),"allocate device weights queue R dim");
+            check_error(cudaMalloc((void**) &d_wgt_queue_s, wgt_queue_count*sizeof(int)),"allocate device weights queue S dim");
             
+            // Populate activations queue
+            count_effectual_activations(n,ct+ck,sx,sy,X,Y,stride,d_layer,act_queue_count,d_act_queue,d_act_queue_x,d_act_queue_y,1);
 
+            // Populate weights queue
+            count_effectual_weights(ck,sx,sy,R,S,kc+Kc,ck,stride,padding,d_layer,wgt_queue_count,d_wgt_queue,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,1);
 
+            //TODO: add streams
+            computePE(n,W,H,K,stride,d_act_queue,d_act_queue_x,d_act_queue_y,act_queue_count,d_wgt_queue, d_wgt_queue_k,
+                            d_wgt_queue_r,d_wgt_queue_s, wgt_queue_count, output_activations);
+
+            //free GPU resources
+            check_error(cudaFree(d_act_queue),"free device activations queue"); 
+            check_error(cudaFree(d_act_queue_x),"free device activations queue X dim"); 
+            check_error(cudaFree(d_act_queue_y),"free device activations queue Y dim"); 
+            check_error(cudaFree(d_wgt_queue),"free device weights queue"); 
+            check_error(cudaFree(d_wgt_queue_k),"free device weights queue K dim"); 
+            check_error(cudaFree(d_wgt_queue_r),"free device weights queue R dim"); 
+            check_error(cudaFree(d_wgt_queue_s),"free device weights queue S dim");
         }
     }
+
+    std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
+
+    printf("computeTile time %.6f\n",time_span.count());
 }
 
 
