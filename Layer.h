@@ -3,7 +3,7 @@
 
 #include <cmath>
 #include <cstdio>
-#include <cnpy.h>
+#include "cnpy.h"
 
 struct Layer {
 
@@ -35,14 +35,18 @@ struct Layer {
     float* output_activations = nullptr;
     std::vector<size_t> out_act_shape;
 
-    Layer(const std::string &_network, const std::string &_name, const std::string &_type, bool _ReLU, int _stride, int _padding);
+    Layer(const std::string &_network, const std::string &_name, const std::string &_type, bool _ReLU, int _stride,
+            int _padding);
     ~Layer();
 
-    float act_get(int i, int j, int k, int l);
-    float wgt_get(int i, int j, int k, int l);
-    uint64_t getMaxIndex(const std::string &array);
+    float act_get(int i, int j, int k, int l) const;
+    float wgt_get(int i, int j, int k, int l) const;
+    uint64_t getMaxIndex(const std::string &array) const;
     void zero_pad();
     void grid_zero_pad(int X, int Y);
+    void act_split_4D(int K, int X, int Y);
+    void wgt_split_4D(int K, int X, int Y);
+    void reshape_to_2D();
     void read_layer();
 
 };
