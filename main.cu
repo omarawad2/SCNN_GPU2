@@ -35,6 +35,28 @@ inline void check_error(cudaError_t err){
     }
 }
 
+
+template <typename T>
+void print(int size, const T a){
+    for(int i=0; i<size;i++)
+        printf("%4.4f;",a[i]);
+    printf("\n");
+}
+
+
+// Check function
+void check_values(const Layer &layer, const float* output_activations, float min_error = 0.01) {
+
+    printf("Checking values for layer: %s of type %s\n",layer.name.c_str(),layer.type == "conv" ? "convolution" :
+            "fully connected");
+    uint32_t count = 0;
+    for(uint32_t i = 0; i < layer.getMaxIndex("output_activations"); i++) {
+        if(fabsf(output_activations[i] - layer.output_activations[i]) > min_error) count++;
+    }
+    printf("ERRORS: %u out of %lu with absolute error tolerance of %.2f\n\n",count,
+            layer.getMaxIndex("output_activations"), min_error);
+}
+
 template <typename T>
 T* host2Dev(uint64_t size, T *h_data){
     T* d_data;
@@ -116,7 +138,7 @@ void computePE(int n, int W, int K, int stride, const float* h_act_queue,, const
 }
 
 //naive implementation
-__global__ void kAddBias(const int N, const int K, const int W, const int H, float* d_output_activations, const Layer* layer){
+__global__ void kAddBias(int N, int K, int W, int H, float* d_output_activations, const Layer &d_layer){
 
     int n = threadIdx.x + blockIdx.x*blockDim.x;
     int k = threadIdx.y + blockIdx.y*blockDim.y;
@@ -125,21 +147,21 @@ __global__ void kAddBias(const int N, const int K, const int W, const int H, flo
         for(int w =0; w < W; w++){
             for(int h=0; h<H; h++){
                 int pos = n * W * H * K + k * W * H + w * H + h;
-                d_output_activations[pos] = layer.bias[k];
+                d_output_activations[pos] = d_layer.bias[k];
             }
         }
     }
 }
 
-void addBias(const int N, const int K, const int W, const int H, float* d_output_activations, Layer* layer){
+void addBias(int N, int K, int W, int H, float* d_output_activations, Layer &d_layer){
 
     dim3 block(32, 32);
     dim3 grid((N+block.x-1)/block.x,(K+block.y-1)/block.y);
-    kAddBias<<<grid, block>>>(N,K,W,H,d_output_activations,layer);
+    kAddBias<<<grid, block>>>(N,K,W,H,d_output_activations,d_layer);
     cudaDeviceSynchronize();
 }
 
-__global__ void kRelu(const int N, const int K, const int W, const int H, float* d_output_activations, Layer* layer){
+__global__ void kRelu(int N, int K, int W, const int H, float* d_output_activations){
     
     int x = threadIdx.x + blockIdx.x*blockDim.x;
 
@@ -148,15 +170,112 @@ __global__ void kRelu(const int N, const int K, const int W, const int H, float*
     }
 }
 
-void relu(const int N, const int K, const int W, const int H, float* d_output_activations, Layer* layer){
+void relu(int N, int K, int W, int H, float* d_output_activations, const Layer &d_layer){
     
-    if(layer.ReLU){
+    if(d_layer.ReLU){
         dim3 block(1024, 1);
         dim3 grid((N*K*W*H+block.x-1)/block.x,1);
-        kRelu<<<grid,block>>>(N,K,W,H,d_output_activations,layer);
+        kRelu<<<grid,block>>>(N,K,W,H,d_output_activations);
         cudaDeviceSynchronize();
     }
 }
+
+//naive implementation
+__global__ void kCount_effectual_activations(int n, int channels, int sx, int sy, int X, int Y, int stride, const Layer &d_layer, uint64_t &d_queue_count){
+
+    int x = threadIdx.x + blockIdx.x*blockDim.x;
+    int y = threadIdx.y + blockIdx.y*blockDim.y;
+
+    if(x < X){
+        int tmp_sx = x % stride;
+        if(y < Y){
+            int tmp_sy = y % stride;
+            float act_bits = d_layer.act_get(n,channels,x,y);
+            if(act_bits !=0 && sx == tmp_sx && sy == tmp_sy) d_queue_count++;
+        }
+    }
+}
+
+void count_effectual_activations(int n, int channels, int sx, int sy, int X, int Y, int stride, const Layer &d_layer, uint64_t &d_queue_count){
+     
+     dim3 block(32, 32);
+     dim3 grid((X+block.x-1)/block.x,(Y+block.y-1)/block.y);
+     //TODO:add streams 
+     kCount_effectual<<<grid, block>>>(n,channels,sx,sy,X,Y,stide,d_layer,d_queue_count);
+     cudaDeviceSynchronize();
+}
+
+//naive implementation
+__global__ void kCount_effectual_weights(int ck, int sx, int sy, int R, int S, int k_end, int ck, int stride, int padding, const Layer &d_layer, uint64_t &d_queue_count){
+    
+    int r = threadIdx.x + blockIdx.x*blockDim.x;
+    int s = threadIdx.y + blockIdx.y*blockDim.y;
+    int k = threadIdx.z + blockIdx.z*blockDim.z;
+
+    if(r < R){
+        int tmp_sx = (r + padding) % stride;
+        if(s < S){
+            int tmp_sy = (s + padding) % stride;
+            if(k < k_end){
+                float wgt_bits = d_layer.wgt_get(k,ck,r,s);
+                if(wgt_bits != 0 && sx == tmp_sx && sy == tmp_sy) d_queue_count++;
+            }
+        }
+    }
+}
+
+
+void count_effectual_weights(int ck, int sx, int sy, int R, int S, int k_end, int ck, int stride, int padding, const Layer &d_layer, uint64_t &d_queue_count){
+
+    dim3 block(16, 16, 4);
+    dim3 grid((R+block.x-1)/block.x,(S+block.y-1)/block.y,(k_end+block.z-1)/block.z);
+    //TODO:add streams 
+    kCount_effectual_weights<<<grid,block>>>(ck,sx,sy,R,S,k_end,ck,stride,padding,d_layer,d_queue_count);
+    cudaDeviceSynchronize();
+}
+
+/*
+n: nth activations window  
+ct: activations channel
+ck: weights channel
+kc: 
+tw, th: not needed
+X: activations window x-dimension
+Y: activations window y-dimension
+K: #weights windows 
+W: no of kernel window strides in x-dimension
+H: no of kernel window strides in y-dimension
+R: weights window x-dimension
+S: weights window y-dimension
+*/
+void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int W, int H, int R, int S, const Layer &layer, float* h_output_activations){
+    int padding = layer.padding;
+    int stride = layer.stride;
+
+    //TODO: try different configurations
+    //iterate strides
+    for(int sx = 0; sx < stride; sx++){
+        for(int sy = 0; sy < stride; sy++){
+    
+            // Count number of effectual activations
+            uint64_t act_queue_count = 0;
+            count_effectual_activations(n,ct+ck,sx,sy,X,Y,stride,d_layer,act_queue_count);
+           
+            // Count number of effectual weights
+            uint64_t wgt_queue_count = 0;
+            count_effectual_weights(ck,sx,sy,R,S,kc+Kc,ck,stride,padding,d_layer,wgt_queue_count);
+
+            // Allocate space for the queues
+            
+
+
+        }
+    }
+
+
+
+}
+
 
 // MAIN
 
