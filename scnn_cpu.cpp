@@ -2,7 +2,7 @@
 // Includes
 
 #include "cnpy.h"
-#include <math.h>
+#include <cmath>
 
 // Constants
 
@@ -330,7 +330,7 @@ std::vector<Layer> read_bvlc_alexnet() {
     network.emplace_back(Layer("bvlc_alexnet","fc7","fc",true,1,0));
     network.emplace_back(Layer("bvlc_alexnet","fc8","fc",false,1,0));
     return network;
-};
+}
 
 // Auxiliary functions
 
@@ -543,15 +543,15 @@ int main(int argc, char *argv[]) {
         }
 
         layer.zero_pad();
-        int N = (int) layer.act_shape[0];
-        int C = (int) layer.act_shape[1];
-        int X = (int) layer.act_shape[2];
-        int Y = (int) layer.act_shape[3];
+        auto N = (int) layer.act_shape[0];
+        auto C = (int) layer.act_shape[1];
+        auto X = (int) layer.act_shape[2];
+        auto Y = (int) layer.act_shape[3];
 
-        int K = (int) layer.wgt_shape[0];
-        int Ck = (int) layer.wgt_shape[1];
-        int R = (int) layer.wgt_shape[2];
-        int S = (int) layer.wgt_shape[3];
+        auto K = (int) layer.wgt_shape[0];
+        auto Ck = (int) layer.wgt_shape[1];
+        auto R = (int) layer.wgt_shape[2];
+        auto S = (int) layer.wgt_shape[3];
 
         int stride = layer.stride;
 

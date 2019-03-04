@@ -1,4 +1,4 @@
-#include "Layer.h"
+#include "layer.h"
 
 	 Layer::Layer(const std::string &_network, const std::string &_name, const std::string &_type, bool _ReLU, int _stride,
            int _padding) : ReLU(_ReLU), stride(_stride), padding(_padding) {
@@ -122,51 +122,51 @@
 
     // Read network from numpy arrays
 
-void Layer::read_layer(Layer &layer) {
+void Layer::read_layer() {
 
     cnpy::NpyArray data_npy;
     uint64_t max_index;
 
-    cnpy::npy_load("net_traces/" + layer.network + "/wgt-" + layer.name + ".npy" , data_npy, layer.wgt_shape);
-    max_index = layer.getMaxIndex("weights");
-    layer.weights = (float *) malloc(max_index * sizeof(float));
-    if (layer.weights == nullptr) {
+    cnpy::npy_load("net_traces/" + network + "/wgt-" + name + ".npy" , data_npy, wgt_shape);
+    max_index = getMaxIndex("weights");
+    weights = (float *) malloc(max_index * sizeof(float));
+    if (weights == nullptr) {
         fprintf(stderr, "Error: Failed to allocate weights!\n");
         exit(EXIT_FAILURE);
     }
     for(uint32_t i = 0; i < max_index; i++)
-        layer.weights[i] = data_npy.data<float>()[i];
+        weights[i] = data_npy.data<float>()[i];
 
-    cnpy::npy_load("net_traces/" + layer.network + "/bias-" + layer.name + ".npy" , data_npy, layer.bias_shape);
-    max_index = layer.getMaxIndex("bias");
-    layer.bias = (float *) malloc(max_index * sizeof(float));
-    if (layer.bias == nullptr) {
+    cnpy::npy_load("net_traces/" + network + "/bias-" + name + ".npy" , data_npy, bias_shape);
+    max_index = getMaxIndex("bias");
+    bias = (float *) malloc(max_index * sizeof(float));
+    if (bias == nullptr) {
         fprintf(stderr, "Error: Failed to allocate bias!\n");
         exit(EXIT_FAILURE);
     }
     for(uint32_t i = 0; i < max_index; i++)
-        layer.bias[i] = data_npy.data<float>()[i];
+        bias[i] = data_npy.data<float>()[i];
 
-    cnpy::npy_load("net_traces/" + layer.network + "/act-" + layer.name + "-0.npy" , data_npy, layer.act_shape);
-    max_index = layer.getMaxIndex("activations");
-    layer.activations = (float *) malloc(max_index * sizeof(float));
-    if (layer.activations == nullptr) {
+    cnpy::npy_load("net_traces/" + network + "/act-" + name + "-0.npy" , data_npy, act_shape);
+    max_index = getMaxIndex("activations");
+    activations = (float *) malloc(max_index * sizeof(float));
+    if (activations == nullptr) {
         fprintf(stderr, "Error: Failed to allocate activations!\n");
         exit(EXIT_FAILURE);
     }
     for(uint32_t i = 0; i < max_index; i++)
-        layer.activations[i] = data_npy.data<float>()[i];
+        activations[i] = data_npy.data<float>()[i];
 
-    cnpy::npy_load("net_traces/" + layer.network + "/act-" + layer.name + "-0-out.npy" , data_npy, layer.out_act_shape);
-    max_index = layer.getMaxIndex("output_activations");
-    layer.output_activations = (float *) malloc(max_index * sizeof(float));
-    if (layer.output_activations == nullptr) {
+    cnpy::npy_load("net_traces/" + network + "/act-" + name + "-0-out.npy" , data_npy, out_act_shape);
+    max_index = getMaxIndex("output_activations");
+    output_activations = (float *) malloc(max_index * sizeof(float));
+    if (output_activations == nullptr) {
         fprintf(stderr, "Error: Failed to allocate output activations!\n");
         exit(EXIT_FAILURE);
     }
     for(uint32_t i = 0; i < max_index; i++)
-        layer.output_activations[i] = data_npy.data<float>()[i];
+        output_activations[i] = data_npy.data<float>()[i];
 
-    printf("Layer %s loaded into memory\n",layer.name.c_str());
+    printf("Layer %s loaded into memory\n",name.c_str());
 
 }
