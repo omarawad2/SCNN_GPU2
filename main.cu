@@ -157,6 +157,7 @@ void relu(const int N, const int K, const int W, const int H, const Layer &layer
     if(layer.ReLU){
         dim3 block(1024, 1);
         dim3 grid((N*K*W*H+block.x-1)/block.x,1);
+        printf("kRelu block: (%d,%d,1), grid: (%d,%d,1)\n",block.x,block.y,grid.x,grid.y);
         kRelu<<<grid,block>>>(N,K,W,H,d_output_activations);
         cudaDeviceSynchronize();
     }
