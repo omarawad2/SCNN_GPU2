@@ -43,7 +43,7 @@ struct Layer {
     uint64_t getMaxIndex(const std::string &array);
     void zero_pad();
     void grid_zero_pad(int X, int Y);
-    void read_layer(Layer &layer);
+    void read_layer();
 
 };
 #endif
