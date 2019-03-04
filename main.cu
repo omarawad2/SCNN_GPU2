@@ -81,6 +81,7 @@ __global__ void kAddBias(int N, int K, int W, int H, const float* d_bias, float*
     int n = threadIdx.x + blockIdx.x*blockDim.x;
     int k = threadIdx.y + blockIdx.y*blockDim.y;
 
+    //TODO: try different configurations
     if(n < N && k < K){
         for(int w =0; w < W; w++){
             for(int h=0; h<H; h++){
@@ -136,7 +137,8 @@ __global__ void kComputePE(int n, int W, int H, int K, int stride, const float* 
 }
 
 //naive implementation
-__global__ void kCount_effectual_activations(int n, int channels, int sx, int sy, int X, int Y, int stride, const Layer &d_layer, uint64_t &d_act_queue_count, float* d_act_queue, int* d_act_queue_x, int* d_act_queue_y, bool populate){
+__global__ void kCount_effectual_activations(int n, int channels, int sx, int sy, int X, int Y, int stride, const Layer &d_layer, uint64_t &d_act_queue_count, 
+    float* d_act_queue, int* d_act_queue_x, int* d_act_queue_y, bool populate){
 
     int x = threadIdx.x + blockIdx.x*blockDim.x;
     int y = threadIdx.y + blockIdx.y*blockDim.y;
@@ -162,7 +164,8 @@ __global__ void kCount_effectual_activations(int n, int channels, int sx, int sy
 }
 
 //naive implementation
-__global__ void kCount_effectual_weights(int ck, int sx, int sy, int R, int S, int k_end, int ck, int stride, int padding, const Layer &d_layer, uint64_t &d_wgt_queue_count, float* d_wgt_queue, int* d_wgt_queue_k, int* d_wgt_queue_r, int* d_wgt_queue_s, bool populate){
+__global__ void kCount_effectual_weights(int ck, int sx, int sy, int R, int S, int k_end, int ck, int stride, int padding, const Layer &d_layer, uint64_t &d_wgt_queue_count, 
+    float* d_wgt_queue, int* d_wgt_queue_k, int* d_wgt_queue_r, int* d_wgt_queue_s, bool populate){
     
     int r = threadIdx.x + blockIdx.x*blockDim.x;
     int s = threadIdx.y + blockIdx.y*blockDim.y;
@@ -276,7 +279,8 @@ void computePE(int n, int W, int H, int K, int stride, const float* d_act_queue,
 }
 
 
-void count_effectual_weights(int ck, int sx, int sy, int R, int S, int k_end, int ck, int stride, int padding, const Layer &d_layer, uint64_t &d_wgt_queue_count, float* d_wgt_queue, int* d_wgt_queue_k, int* d_wgt_queue_r, int* d_wgt_queue_s, bool populate){
+void count_effectual_weights(int ck, int sx, int sy, int R, int S, int k_end, int ck, int stride, int padding, const Layer &d_layer, uint64_t &d_wgt_queue_count, 
+    float* d_wgt_queue, int* d_wgt_queue_k, int* d_wgt_queue_r, int* d_wgt_queue_s, bool populate){
 
     dim3 block(16, 16, 4);
     dim3 grid((R+block.x-1)/block.x,(S+block.y-1)/block.y,(k_end+block.z-1)/block.z);
@@ -285,7 +289,8 @@ void count_effectual_weights(int ck, int sx, int sy, int R, int S, int k_end, in
     cudaDeviceSynchronize();
 }
 
-void count_effectual_activations(int n, int channels, int sx, int sy, int X, int Y, int stride, const Layer &d_layer, uint64_t &d_act_queue_count, float* d_act_queue, int* d_act_queue_x, int* d_act_queue_y, bool populate){
+void count_effectual_activations(int n, int channels, int sx, int sy, int X, int Y, int stride, const Layer &d_layer, uint64_t &d_act_queue_count, 
+    float* d_act_queue, int* d_act_queue_x, int* d_act_queue_y, bool populate){
      
      dim3 block(32, 32);
      dim3 grid((X+block.x-1)/block.x,(Y+block.y-1)/block.y);
@@ -308,7 +313,7 @@ H: no of kernel window strides in y-dimension
 R: weights window x-dimension
 S: weights window y-dimension
 */
-void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int W, int H, int R, int S, const Layer &layer, float* h_output_activations){
+void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int W, int H, int R, int S, const Layer &layer, float* d_output_activations){
 
     std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 
@@ -347,7 +352,7 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 
             //TODO: add streams
             computePE(n,W,H,K,stride,d_act_queue,d_act_queue_x,d_act_queue_y,act_queue_count,d_wgt_queue, d_wgt_queue_k,
-                            d_wgt_queue_r,d_wgt_queue_s, wgt_queue_count, output_activations);
+                            d_wgt_queue_r,d_wgt_queue_s, wgt_queue_count, d_output_activations);
 
             //free GPU resources
             check_error(cudaFree(d_act_queue),"free device activations queue"); 
@@ -420,7 +425,15 @@ int main(int argc, char *argv[]) {
 
         addBias(N, K, W, H, layer, d_output_activations);
 
-        // TODO: core compute
+        //core compute
+        for(int n = 0; n < N; n++) {
+            for(int ct = 0; ct < C; ct+=Ck) {
+                for(int ck = 0; ck < Ck; ck++) {
+                    computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,d_output_activations);
+                }
+                kc += Kc;
+            }
+        }
 
         relu(N, K, W, H, layer, d_output_activations);
 
