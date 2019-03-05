@@ -325,15 +325,16 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
     for(int sx = 0; sx < stride; sx++){
         for(int sy = 0; sy < stride; sy++){
     
-            float* d_act_queue, d_act_queue_x, d_act_queue_y, d_wgt_queue, d_wgt_queue_k, d_wgt_queue_r, d_wgt_queue_s;
+            float* d_act_queue, d_wgt_queue;
+            int* d_act_queue_x, d_act_queue_y, d_wgt_queue_k, d_wgt_queue_r, d_wgt_queue_s;
 
             // Count number of effectual activations
             uint64_t act_queue_count = 0;
-            count_effectual_activations(n,ct+ck,sx,sy,X,Y,stride,d_layer,act_queue_count,d_act_queue,d_act_queue_x,d_act_queue_y,0);
+            count_effectual_activations(n,ct+ck,sx,sy,X,Y,stride,d_layer,act_queue_count,d_act_queue,d_act_queue_x,d_act_queue_y,false);
            
             // Count number of effectual weights
             uint64_t wgt_queue_count = 0;
-            count_effectual_weights(ck,sx,sy,R,S,kc+Kc,ck,stride,padding,d_layer,wgt_queue_count,d_wgt_queue,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,0);
+            count_effectual_weights(ck,sx,sy,R,S,kc+Kc,ck,stride,padding,d_layer,wgt_queue_count,d_wgt_queue,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,false);
 
             // Allocate space for the queues on device
             check_error(cudaMalloc((void**) &d_act_queue, act_queue_count*sizeof(float)),"allocate device activations queue");
@@ -345,10 +346,10 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
             check_error(cudaMalloc((void**) &d_wgt_queue_s, wgt_queue_count*sizeof(int)),"allocate device weights queue S dim");
             
             // Populate activations queue
-            count_effectual_activations(n,ct+ck,sx,sy,X,Y,stride,d_layer,act_queue_count,d_act_queue,d_act_queue_x,d_act_queue_y,1);
+            count_effectual_activations(n,ct+ck,sx,sy,X,Y,stride,d_layer,act_queue_count,d_act_queue,d_act_queue_x,d_act_queue_y,true);
 
             // Populate weights queue
-            count_effectual_weights(ck,sx,sy,R,S,kc+Kc,ck,stride,padding,d_layer,wgt_queue_count,d_wgt_queue,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,1);
+            count_effectual_weights(ck,sx,sy,R,S,kc+Kc,ck,stride,padding,d_layer,wgt_queue_count,d_wgt_queue,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,true);
 
             //TODO: add streams
             computePE(n,W,H,K,stride,d_act_queue,d_act_queue_x,d_act_queue_y,act_queue_count,d_wgt_queue, d_wgt_queue_k,
