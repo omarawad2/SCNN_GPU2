@@ -3,14 +3,12 @@
 
 #include "cnpy.h"
 #include <cmath>
+#include <omp.h>
 
 // Constants
 
-/* Number of PE per column */
-const int Wt = 8;
-
-/* Number of PE per row */
-const int Ht = 8;
+/* Number of concurrent cores */
+const int N_THREADS = 1;
 
 /* Column multipliers per PE */
 const int I = 4;
@@ -378,6 +376,8 @@ void computePE(int n, int W, int H, int K, int stride, const float* act_queue, c
 
                     if(w >= 0 && w < W && h >= 0 && h < H) {
                         auto pos = n * W * H * K + k * W * H + w * H + h;
+
+                        #pragma omp atomic
                         output_activations[pos] += act * wgt;
                     }
 
@@ -388,134 +388,129 @@ void computePE(int n, int W, int H, int K, int stride, const float* act_queue, c
     }
 }
 
-void computeTile(int n, int ct, int ck, int kc, int tw, int th, int Kc, int X, int Y, int K, int W, int H, int R, int S,
+void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int W, int H, int R, int S,
         const Layer &layer, float* output_activations) {
 
     int padding = layer.padding;
     int stride = layer.stride;
 
     // Iterate PEs
-    for(int pex = 0; pex < Wt; pex++) {
-        for(int pey = 0; pey < Ht; pey++) {
 
-            int x_begin = pex * tw, y_begin = pey * th, k_begin = kc;
-            int x_end = std::min(x_begin + tw, X), y_end = std::min(y_begin + th, Y), k_end = k_begin + Kc;
+    int k_begin = kc;
+    int k_end = k_begin + Kc;
 
-            // Iterate strides
-            for(int sx = 0; sx < stride; sx++) {
-                for(int sy = 0; sy < stride; sy++) {
+    // Iterate strides
+    for(int sx = 0; sx < stride; sx++) {
+        for(int sy = 0; sy < stride; sy++) {
 
-                    // Count number of effectual activations
-                    uint64_t act_queue_count = 0;
-                    for(int x = x_begin; x < x_end; x++) {
-                        int tmp_sx = x % stride;
-                        for(int y = y_begin; y < y_end; y++) {
-                            int tmp_sy = y % stride;
-                            auto act_bits = layer.act_get(n,ct+ck,x,y);
-                            if(act_bits != 0 && sx == tmp_sx && sy == tmp_sy) act_queue_count++;
-                        }
-                    }
-
-                    // Count number of effectual weights
-                    uint64_t wgt_queue_count = 0;
-                    for(int r = 0; r < R; r++) {
-                        int tmp_sx = (r + padding) % stride;
-                        for(int s = 0; s < S; s++) {
-                            int tmp_sy = (s + padding) % stride;
-                            for(int k = k_begin; k < k_end; k++) {
-                                auto wgt_bits = layer.wgt_get(k,ck,r,s);
-                                if(wgt_bits != 0 && sx == tmp_sx && sy == tmp_sy) wgt_queue_count++;
-                            }
-                        }
-                    }
-
-                    // Allocate space for the queues
-                    auto act_queue = (float *) malloc(act_queue_count * sizeof(float));
-                    if (act_queue == nullptr) {
-                        fprintf(stderr, "Error: Failed to allocate activations queue!\n");
-                        exit(EXIT_FAILURE);
-                    }
-                    auto act_queue_x = ((int *) malloc(act_queue_count * sizeof(int)));
-                    if (act_queue_x == nullptr) {
-                        fprintf(stderr, "Error: Failed to allocate activations queue x!\n");
-                        exit(EXIT_FAILURE);
-                    }
-                    auto act_queue_y = ((int *) malloc(act_queue_count * sizeof(int)));
-                    if (act_queue_y == nullptr) {
-                        fprintf(stderr, "Error: Failed to allocate activations queue y!\n");
-                        exit(EXIT_FAILURE);
-                    }
-
-                    auto wgt_queue = (float *) malloc(wgt_queue_count * sizeof(float));
-                    if (wgt_queue == nullptr) {
-                        fprintf(stderr, "Error: Failed to allocate weights queue!\n");
-                        exit(EXIT_FAILURE);
-                    }
-                    auto wgt_queue_k = ((int *) malloc(wgt_queue_count * sizeof(int)));
-                    if (wgt_queue_k == nullptr) {
-                        fprintf(stderr, "Error: Failed to allocate weights queue k!\n");
-                        exit(EXIT_FAILURE);
-                    }
-                    auto wgt_queue_r = ((int *) malloc(wgt_queue_count * sizeof(int)));
-                    if (wgt_queue_r == nullptr) {
-                        fprintf(stderr, "Error: Failed to allocate weights queue r!\n");
-                        exit(EXIT_FAILURE);
-                    }
-                    auto wgt_queue_s = ((int *) malloc(wgt_queue_count * sizeof(int)));
-                    if (wgt_queue_s == nullptr) {
-                        fprintf(stderr, "Error: Failed to allocate weights queue s!\n");
-                        exit(EXIT_FAILURE);
-                    }
-
-                    // Populate activations queue
-                    uint64_t index = 0;
-                    for(int x = x_begin; x < x_end; x++) {
-                        int tmp_sx = x % stride;
-                        for(int y = y_begin; y < y_end; y++) {
-                            int tmp_sy = y % stride;
-                            auto act_bits = layer.act_get(n,ct+ck,x,y);
-                            if(act_bits != 0 && sx == tmp_sx && sy == tmp_sy) {
-                                act_queue[index] = act_bits;
-                                act_queue_x[index] = x;
-                                act_queue_y[index] = y;
-                                index++;
-                            }
-                        }
-                    }
-
-                    // Populate weights queue
-                    index = 0;
-                    for(int r = 0; r < R; r++) {
-                        int tmp_sx = (r + padding) % stride;
-                        for(int s = 0; s < S; s++) {
-                            int tmp_sy = (s + padding) % stride;
-                            for(int k = k_begin; k < k_end; k++) {
-                                auto wgt_bits =layer.wgt_get(k,ck,r,s);
-                                if (wgt_bits != 0 && sx == tmp_sx && sy == tmp_sy) {
-                                    wgt_queue[index] = wgt_bits;
-                                    wgt_queue_k[index] = k;
-                                    wgt_queue_r[index] = r;
-                                    wgt_queue_s[index] = s;
-                                    index++;
-                                }
-                            }
-                        }
-                    }
-
-                    computePE(n,W,H,K,stride,act_queue,act_queue_x,act_queue_y,act_queue_count,wgt_queue, wgt_queue_k,
-                            wgt_queue_r,wgt_queue_s, wgt_queue_count, output_activations);
-
-                    free(act_queue);
-                    free(act_queue_x);
-                    free(act_queue_y);
-
-                    free(wgt_queue);
-                    free(wgt_queue_k);
-                    free(wgt_queue_r);
-                    free(wgt_queue_s);
-
+            // Count number of effectual activations
+            uint64_t act_queue_count = 0;
+            for(int x = 0; x < X; x++) {
+                int tmp_sx = x % stride;
+                for(int y = 0; y < Y; y++) {
+                    int tmp_sy = y % stride;
+                    auto act_bits = layer.act_get(n,ct+ck,x,y);
+                    if(act_bits != 0 && sx == tmp_sx && sy == tmp_sy) act_queue_count++;
                 }
             }
+
+                    // Count number of effectual weights
+            uint64_t wgt_queue_count = 0;
+            for(int r = 0; r < R; r++) {
+                int tmp_sx = (r + padding) % stride;
+                for(int s = 0; s < S; s++) {
+                    int tmp_sy = (s + padding) % stride;
+                    for(int k = k_begin; k < k_end; k++) {
+                        auto wgt_bits = layer.wgt_get(k,ck,r,s);
+                        if(wgt_bits != 0 && sx == tmp_sx && sy == tmp_sy) wgt_queue_count++;
+                    }
+                }
+            }
+
+            // Allocate space for the queues
+            auto act_queue = (float *) malloc(act_queue_count * sizeof(float));
+            if (act_queue == nullptr) {
+                fprintf(stderr, "Error: Failed to allocate activations queue!\n");
+                exit(EXIT_FAILURE);
+            }
+            auto act_queue_x = ((int *) malloc(act_queue_count * sizeof(int)));
+            if (act_queue_x == nullptr) {
+                fprintf(stderr, "Error: Failed to allocate activations queue x!\n");
+                exit(EXIT_FAILURE);
+            }
+            auto act_queue_y = ((int *) malloc(act_queue_count * sizeof(int)));
+            if (act_queue_y == nullptr) {
+                fprintf(stderr, "Error: Failed to allocate activations queue y!\n");
+                exit(EXIT_FAILURE);
+            }
+
+            auto wgt_queue = (float *) malloc(wgt_queue_count * sizeof(float));
+            if (wgt_queue == nullptr) {
+                fprintf(stderr, "Error: Failed to allocate weights queue!\n");
+                exit(EXIT_FAILURE);
+            }
+            auto wgt_queue_k = ((int *) malloc(wgt_queue_count * sizeof(int)));
+            if (wgt_queue_k == nullptr) {
+                fprintf(stderr, "Error: Failed to allocate weights queue k!\n");
+                exit(EXIT_FAILURE);
+            }
+            auto wgt_queue_r = ((int *) malloc(wgt_queue_count * sizeof(int)));
+            if (wgt_queue_r == nullptr) {
+                fprintf(stderr, "Error: Failed to allocate weights queue r!\n");
+                exit(EXIT_FAILURE);
+            }
+            auto wgt_queue_s = ((int *) malloc(wgt_queue_count * sizeof(int)));
+            if (wgt_queue_s == nullptr) {
+                fprintf(stderr, "Error: Failed to allocate weights queue s!\n");
+                exit(EXIT_FAILURE);
+            }
+
+            // Populate activations queue
+            uint64_t index = 0;
+            for(int x = 0; x < X; x++) {
+                int tmp_sx = x % stride;
+                for(int y = 0; y < Y; y++) {
+                    int tmp_sy = y % stride;
+                    auto act_bits = layer.act_get(n,ct+ck,x,y);
+                    if(act_bits != 0 && sx == tmp_sx && sy == tmp_sy) {
+                        act_queue[index] = act_bits;
+                        act_queue_x[index] = x;
+                        act_queue_y[index] = y;
+                        index++;
+                    }
+                }
+            }
+
+            // Populate weights queue
+            index = 0;
+            for(int r = 0; r < R; r++) {
+                int tmp_sx = (r + padding) % stride;
+                for(int s = 0; s < S; s++) {
+                    int tmp_sy = (s + padding) % stride;
+                    for(int k = k_begin; k < k_end; k++) {
+                        auto wgt_bits =layer.wgt_get(k,ck,r,s);
+                        if (wgt_bits != 0 && sx == tmp_sx && sy == tmp_sy) {
+                            wgt_queue[index] = wgt_bits;
+                            wgt_queue_k[index] = k;
+                            wgt_queue_r[index] = r;
+                            wgt_queue_s[index] = s;
+                            index++;
+                        }
+                    }
+                }
+            }
+
+            computePE(n,W,H,K,stride,act_queue,act_queue_x,act_queue_y,act_queue_count,wgt_queue, wgt_queue_k,
+                    wgt_queue_r,wgt_queue_s, wgt_queue_count, output_activations);
+
+            free(act_queue);
+            free(act_queue_x);
+            free(act_queue_y);
+
+            free(wgt_queue);
+            free(wgt_queue_k);
+            free(wgt_queue_r);
+            free(wgt_queue_s);
 
         }
     }
@@ -562,11 +557,6 @@ int main(int argc, char *argv[]) {
         int Kc = K / groups;
         int kc = 0;
 
-        X = (int)(ceil(X/(double)Wt))*Wt;
-        Y = (int)(ceil(Y/(double)Ht))*Ht;
-        auto tw = X/Wt;
-        auto th = Y/Wt;
-
         layer.grid_zero_pad(X ,Y);
 
         // Initialize variables
@@ -596,8 +586,12 @@ int main(int argc, char *argv[]) {
 
         for(int n = 0; n < N; n++) {
             for(int ct = 0; ct < C; ct+=Ck) {
-                for(int ck = 0; ck < Ck; ck++) {
-                    computeTile(n,ct,ck,kc,tw,th,Kc,X,Y,K,W,H,R,S,layer,output_activations);
+                int ck;
+                auto max_threads = omp_get_max_threads();
+                omp_set_num_threads(std::min(max_threads,N_THREADS));
+                #pragma omp parallel for private(ck)
+                for(ck = 0; ck < Ck; ck++) {
+                    computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,output_activations);
                 }
                 kc += Kc;
             }
