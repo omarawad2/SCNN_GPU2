@@ -8,3 +8,7 @@ Command line compilation. First we need to configure the project:
 Then, we can proceed to build the project
 
     cmake --build cmake-build-release/ --target all
+
+### Reference papers:
+https://arxiv.org/pdf/1801.02108.pdf
+
