@@ -80,46 +80,6 @@ void Layer::zero_pad() {
 
 }
 
-void Layer::grid_zero_pad(int X, int Y) {
-
-    auto batch_size = act_shape[0];
-    auto act_channels = act_shape[1];
-    auto Nx = act_shape[2];
-    auto Ny = act_shape[3];
-
-    uint64_t new_max_index = batch_size * act_channels * X * Y;
-    auto tmp_activations = (float *) malloc(new_max_index * sizeof(float));
-    if (tmp_activations == nullptr) {
-        fprintf(stderr, "Error: Failed to allocate padded activations!\n");
-        exit(EXIT_FAILURE);
-    }
-
-    for(uint64_t i = 0; i < new_max_index; i++) {
-        tmp_activations[i] = 0;
-    }
-
-    for(int n = 0; n < batch_size; n++) {
-        for (int k = 0; k < act_channels; k++) {
-            for (int i = 0; i < Nx; i++) {
-                for(int j = 0; j < Ny; j++) {
-                    auto index_out = act_channels*X*Y*n + X*Y*k + Y*i + j;
-                    auto index_in = act_channels*Nx*Ny*n + Nx*Ny*k + Ny*i + j;
-                    tmp_activations[index_out] = activations[index_in];
-                }
-            }
-        }
-    }
-
-    free(activations);
-    activations = tmp_activations;
-    act_shape.clear();
-    act_shape.push_back(batch_size);
-    act_shape.push_back(act_channels);
-    act_shape.push_back((unsigned)X);
-    act_shape.push_back((unsigned)Y);
-
-}
-
 void Layer::act_split_4D(int K, int X, int Y) {
 
     auto batch_size = act_shape[0];

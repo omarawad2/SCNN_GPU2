@@ -43,7 +43,6 @@ struct Layer {
     float wgt_get(int i, int j, int k, int l) const;
     uint64_t getMaxIndex(const std::string &array) const;
     void zero_pad();
-    void grid_zero_pad(int X, int Y);
     void act_split_4D(int K, int X, int Y);
     void wgt_split_4D(int K, int X, int Y);
     void reshape_to_2D();
