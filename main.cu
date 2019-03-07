@@ -1,8 +1,5 @@
 
 #include "Layer.h"
-#include <cmath>
-#include <algorithm>
-#include <chrono>
 
 #define GLOBAL_TIME
 
@@ -10,14 +7,14 @@
 
 std::vector<Layer> read_bvlc_alexnet() {
     std::vector<Layer> network;
-    network.emplace_back(Layer("bvlc_alexnet","conv1","conv",true,4,0));
-    network.emplace_back(Layer("bvlc_alexnet","conv2","conv",true,1,2));
-    network.emplace_back(Layer("bvlc_alexnet","conv3","conv",true,1,1));
-    network.emplace_back(Layer("bvlc_alexnet","conv4","conv",true,1,1));
-    network.emplace_back(Layer("bvlc_alexnet","conv5","conv",true,1,1));
-    network.emplace_back(Layer("bvlc_alexnet","fc6","fc",true,1,0));
-    network.emplace_back(Layer("bvlc_alexnet","fc7","fc",true,1,0));
-    network.emplace_back(Layer("bvlc_alexnet","fc8","fc",false,1,0));
+    network.push_back(Layer("bvlc_alexnet","conv1","conv",true,4,0));
+    network.push_back(Layer("bvlc_alexnet","conv2","conv",true,1,2));
+    network.push_back(Layer("bvlc_alexnet","conv3","conv",true,1,1));
+    network.push_back(Layer("bvlc_alexnet","conv4","conv",true,1,1));
+    network.push_back(Layer("bvlc_alexnet","conv5","conv",true,1,1));
+    network.push_back(Layer("bvlc_alexnet","fc6","fc",true,1,0));
+    network.push_back(Layer("bvlc_alexnet","fc7","fc",true,1,0));
+    network.push_back(Layer("bvlc_alexnet","fc8","fc",false,1,0));
     return network;
 }
 
@@ -136,7 +133,7 @@ __global__ void kCount_effectual_activations(int n, int channel, int sx, int sy,
         int tmp_sx = x % stride;
         if(y < Y){
             int tmp_sy = y % stride;
-            auto pos = C*X*Y*n + X*Y*channel + X*x + y;
+            int pos = C*X*Y*n + X*Y*channel + X*x + y;
             float act_bits = d_act[pos];
             if(act_bits !=0 && sx == tmp_sx && sy == tmp_sy){
                 atomicAdd(d_act_queue_count,1);
@@ -156,7 +153,7 @@ __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int 
         int tmp_sx = x % stride;
         if(y < Y){
             int tmp_sy = y % stride;
-            auto pos = C*X*Y*n + X*Y*channel + X*x + y;
+            int pos = C*X*Y*n + X*Y*channel + X*x + y;
             float act_bits = d_act[pos];
             if(act_bits !=0 && sx == tmp_sx && sy == tmp_sy){
                 int index = x+y*X;
@@ -181,7 +178,7 @@ __global__ void kCount_effectual_weights(int ck, int sx, int sy,int k_begin, int
         if(s < S){
             int tmp_sy = (s + padding) % stride;
             if(k < k_end){
-                auto pos = Ck*R*S*(k_begin + k) + R*S*ck + S*r + r;
+                int pos = Ck*R*S*(k_begin + k) + R*S*ck + S*r + r;
                 float wgt_bits = d_wgt[pos];
                 if(wgt_bits != 0 && sx == tmp_sx && sy == tmp_sy){
                     atomicAdd(d_wgt_queue_count,1);
@@ -205,7 +202,7 @@ __global__ void kPopulate_effectual_weights(int ck, int sx, int sy,int k_begin, 
         if(s < S){
             int tmp_sy = (s + padding) % stride;
             if(k < k_end){
-                auto pos = Ck*R*S*(k_begin + k) + R*S*ck + S*r + r;
+                int pos = Ck*R*S*(k_begin + k) + R*S*ck + S*r + r;
                 float wgt_bits = d_wgt[pos];
                 if(wgt_bits != 0 && sx == tmp_sx && sy == tmp_sy){
                     int index = r+s*R+k*R*S;
@@ -418,20 +415,20 @@ void computePE(int n, int W, int H, int K, int stride, const float* act_queue, c
             for(uint64_t ii = i; ii < std::min(i + 4, act_queue_size); ii++) {
                 for(uint64_t ff = f; ff < std::min(f + 4, wgt_queue_size); ff++) {
 
-                    auto act = act_queue[ii];
-                    auto x = act_queue_x[ii];
-                    auto y = act_queue_y[ii];
+                    float act = act_queue[ii];
+                    int x = act_queue_x[ii];
+                    int y = act_queue_y[ii];
 
-                    auto wgt = wgt_queue[ff];
-                    auto k = wgt_queue_k[ff];
-                    auto r = wgt_queue_r[ff];
-                    auto s = wgt_queue_s[ff];
+                    float wgt = wgt_queue[ff];
+                    int k = wgt_queue_k[ff];
+                    int r = wgt_queue_r[ff];
+                    int s = wgt_queue_s[ff];
 
                     int w = (x - r) / stride;
                     int h = (y - s) / stride;
 
                     if(w >= 0 && w < W && h >= 0 && h < H) {
-                        auto pos = n * W * H * K + k * W * H + w * H + h;
+                        int pos = n * W * H * K + k * W * H + w * H + h;
 
                         #pragma omp atomic
                         output_activations[pos] += act * wgt;
@@ -461,15 +458,15 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int K, int W, int H, con
 
             // Count number of effectual activations
             int act_queue_count = 0;
-            auto d_act = count_effectual_activations(n,ct+ck,sx,sy,stride,layer,act_queue_count);
+            float *d_act = count_effectual_activations(n,ct+ck,sx,sy,stride,layer,act_queue_count);
 
             // Count number of effectual weights
             int wgt_queue_count = 0;
-            auto d_wgt = count_effectual_weights(ck,sx,sy,k_begin,k_end,stride,padding,layer,wgt_queue_count);
+            float *d_wgt = count_effectual_weights(ck,sx,sy,k_begin,k_end,stride,padding,layer,wgt_queue_count);
 
-            float *d_act_queue = nullptr, *d_wgt_queue = nullptr;
-            int *d_act_queue_x = nullptr, *d_act_queue_y = nullptr;
-            int *d_wgt_queue_k = nullptr, *d_wgt_queue_r = nullptr, *d_wgt_queue_s = nullptr;
+            float *d_act_queue, *d_wgt_queue;
+            int *d_act_queue_x, *d_act_queue_y;
+            int *d_wgt_queue_k, *d_wgt_queue_r, *d_wgt_queue_s;
 
             // Allocate space for the queues on device
             check_error(cudaMalloc((void**) &d_act_queue, act_queue_count*sizeof(float)),"allocate device activations queue");
@@ -491,13 +488,13 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int K, int W, int H, con
             // ###############################Remove by GPU code {
 
             // Allocate space for the queues
-            auto act_queue = (float *) malloc(act_queue_count * sizeof(float));
-            auto act_queue_x = ((int *) malloc(act_queue_count * sizeof(int)));
-            auto act_queue_y = ((int *) malloc(act_queue_count * sizeof(int)));
-            auto wgt_queue = (float *) malloc(wgt_queue_count * sizeof(float));
-            auto wgt_queue_k = ((int *) malloc(wgt_queue_count * sizeof(int)));
-            auto wgt_queue_r = ((int *) malloc(wgt_queue_count * sizeof(int)));
-            auto wgt_queue_s = ((int *) malloc(wgt_queue_count * sizeof(int)));
+            float *act_queue = (float*) malloc(act_queue_count * sizeof(float));
+            int *act_queue_x = ((int*) malloc(act_queue_count * sizeof(int)));
+            int *act_queue_y = ((int*) malloc(act_queue_count * sizeof(int)));
+            float *wgt_queue = (float*) malloc(wgt_queue_count * sizeof(float));
+            int *wgt_queue_k = ((int*) malloc(wgt_queue_count * sizeof(int)));
+            int *wgt_queue_r = ((int*) malloc(wgt_queue_count * sizeof(int)));
+            int *wgt_queue_s = ((int*) malloc(wgt_queue_count * sizeof(int)));
 
             check_error(cudaMemcpy(act_queue, d_act_queue, act_queue_count*sizeof(float), cudaMemcpyDeviceToHost),"");
             check_error(cudaMemcpy(act_queue_x, d_act_queue_x, act_queue_count*sizeof(int), cudaMemcpyDeviceToHost),"");
@@ -539,18 +536,20 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int K, int W, int H, con
 
 int main(int argc, char *argv[]) {
 
-    auto network = read_bvlc_alexnet();
+    std::vector<Layer> network = read_bvlc_alexnet();
 
-    for(auto layer : network) {
+    for(int i = 0; i < network.size(); i++) {
+
+	Layer layer = network[i];
 
         layer.read_layer();
 
         if(layer.type == "fc") {
             layer.reshape_to_2D();
-            auto C = layer.act_shape[1];
+            int C = layer.act_shape[1];
             layer.act_split_4D((unsigned)(C / 256), 16, 16);
 
-            auto Ck = layer.wgt_shape[1];
+            int Ck = layer.wgt_shape[1];
             layer.wgt_split_4D((unsigned)(Ck / 256), 16, 16);
         }
 
@@ -582,8 +581,8 @@ int main(int argc, char *argv[]) {
         addBias(N, K, W, H, layer, d_output_activations);
 
         // ############################## TEST ############################################ {
-        auto h_output_activations = (float *) malloc(bytes);
-        if (h_output_activations == nullptr) {
+        float *h_output_activations = (float *) malloc(bytes);
+        if (h_output_activations == NULL) {
             fprintf(stderr, "Error: Failed to allocate output activations!\n");
             exit(EXIT_FAILURE);
         }
@@ -610,8 +609,8 @@ int main(int argc, char *argv[]) {
 
         relu(N, K, W, H, layer, d_output_activations);
 
-        /*auto h_output_activations = (float *) malloc(bytes);
-        if (h_output_activations == nullptr) {
+        /*float *h_output_activations = (float *) malloc(bytes);
+        if (h_output_activations == NULL) {
             fprintf(stderr, "Error: Failed to allocate output activations!\n");
             exit(EXIT_FAILURE);
         }*/

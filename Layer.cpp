@@ -5,22 +5,25 @@ Layer::Layer(const std::string &_network, const std::string &_name, const std::s
     this->network = _network;
     this->name = _name;
     this->type = _type;
+	this->init = false;
 }
 
 Layer::~Layer() {
-    free(weights);
-    free(bias);
-    free(activations);
-    free(output_activations);
+	if(init) {
+		free(weights);
+		free(bias);
+		free(activations);
+		free(output_activations);
+	}
 }
 
 float Layer::act_get(int i, int j, int k, int l) const {
-    auto index = act_shape[1]*act_shape[2]*act_shape[3]*i + act_shape[2]*act_shape[3]*j + act_shape[3]*k + l;
+    uint32_t index = act_shape[1]*act_shape[2]*act_shape[3]*i + act_shape[2]*act_shape[3]*j + act_shape[3]*k + l;
     return activations[index];
 }
 
 float Layer::wgt_get(int i, int j, int k, int l) const {
-    auto index = wgt_shape[1]*wgt_shape[2]*wgt_shape[3]*i + wgt_shape[2]*wgt_shape[3]*j + wgt_shape[3]*k + l;
+    uint32_t index = wgt_shape[1]*wgt_shape[2]*wgt_shape[3]*i + wgt_shape[2]*wgt_shape[3]*j + wgt_shape[3]*k + l;
     return weights[index];
 }
 
@@ -39,16 +42,16 @@ uint64_t Layer::getMaxIndex(const std::string &array) const {
 
 void Layer::zero_pad() {
 
-    auto batch_size = act_shape[0];
-    auto act_channels = act_shape[1];
-    auto Nx = act_shape[2];
-    auto Ny = act_shape[3];
-    auto new_Nx = Nx + 2*padding;
-    auto new_Ny = Ny + 2*padding;
+    int batch_size = act_shape[0];
+    int act_channels = act_shape[1];
+    int Nx = act_shape[2];
+    int Ny = act_shape[3];
+    int new_Nx = Nx + 2*padding;
+    int new_Ny = Ny + 2*padding;
 
     uint64_t new_max_index = batch_size * act_channels * new_Nx * new_Ny;
-    auto tmp_activations = (float *) malloc(new_max_index * sizeof(float));
-    if (tmp_activations == nullptr) {
+    float *tmp_activations = (float *) malloc(new_max_index * sizeof(float));
+    if (tmp_activations == NULL) {
         fprintf(stderr, "Error: Failed to allocate padded activations!\n");
         exit(EXIT_FAILURE);
     }
@@ -61,9 +64,9 @@ void Layer::zero_pad() {
         for (int k = 0; k < act_channels; k++) {
             for (int i = 0; i < Nx; i++) {
                 for(int j = 0; j < Ny; j++) {
-                    auto index_out = act_channels*new_Nx*new_Ny*n + new_Nx*new_Ny*k + new_Ny*(padding + i) +
+                    uint32_t index_out = act_channels*new_Nx*new_Ny*n + new_Nx*new_Ny*k + new_Ny*(padding + i) +
                             (padding + j);
-                    auto index_in = act_channels*Nx*Ny*n + Nx*Ny*k + Ny*i + j;
+                    uint32_t index_in = act_channels*Nx*Ny*n + Nx*Ny*k + Ny*i + j;
                     tmp_activations[index_out] = activations[index_in];
                 }
             }
@@ -82,14 +85,14 @@ void Layer::zero_pad() {
 
 void Layer::act_split_4D(int K, int X, int Y) {
 
-    auto batch_size = act_shape[0];
-    auto act_channels = act_shape[1];
-    auto Nx = act_shape[2];
-    auto Ny = act_shape[3];
+    int batch_size = act_shape[0];
+    int act_channels = act_shape[1];
+    int Nx = act_shape[2];
+    int Ny = act_shape[3];
 
     uint64_t new_max_index = batch_size * K * X * Y;
-    auto tmp_activations = (float *) malloc(new_max_index * sizeof(float));
-    if (tmp_activations == nullptr) {
+    float *tmp_activations = (float *) malloc(new_max_index * sizeof(float));
+    if (tmp_activations == NULL) {
         fprintf(stderr, "Error: Failed to allocate padded activations!\n");
         exit(EXIT_FAILURE);
     }
@@ -98,12 +101,12 @@ void Layer::act_split_4D(int K, int X, int Y) {
         for (int k = 0; k < act_channels; k++) {
             for (int i = 0; i < Nx; i++) {
                 for(int j = 0; j < Ny; j++) {
-                    auto new_k = k / (X*Y);
-                    auto rem = k % (X*Y);
-                    auto new_i = rem / Y;
-                    auto new_j = rem % Y;
-                    auto index_out = K*X*Y*n + X*Y*new_k + Y*new_i + new_j;
-                    auto index_in = act_channels*Nx*Ny*n + Nx*Ny*k + Ny*i + j;
+                    int new_k = k / (X*Y);
+                    int rem = k % (X*Y);
+                    int new_i = rem / Y;
+                    int new_j = rem % Y;
+                    uint32_t index_out = K*X*Y*n + X*Y*new_k + Y*new_i + new_j;
+                    uint32_t index_in = act_channels*Nx*Ny*n + Nx*Ny*k + Ny*i + j;
                     tmp_activations[index_out] = activations[index_in];
                 }
             }
@@ -122,14 +125,14 @@ void Layer::act_split_4D(int K, int X, int Y) {
 
 void Layer::wgt_split_4D(int K, int X, int Y) {
 
-    auto num_filters = wgt_shape[0];
-    auto wgt_channels = wgt_shape[1];
-    auto Kx = wgt_shape[2];
-    auto Ky = wgt_shape[3];
+    int num_filters = wgt_shape[0];
+    int wgt_channels = wgt_shape[1];
+    int Kx = wgt_shape[2];
+    int Ky = wgt_shape[3];
 
     uint64_t new_max_index = num_filters * K * X * Y;
-    auto tmp_weights = (float *) malloc(new_max_index * sizeof(float));
-    if (tmp_weights == nullptr) {
+    float *tmp_weights = (float *) malloc(new_max_index * sizeof(float));
+    if (tmp_weights == NULL) {
         fprintf(stderr, "Error: Failed to allocate padded weights!\n");
         exit(EXIT_FAILURE);
     }
@@ -138,12 +141,12 @@ void Layer::wgt_split_4D(int K, int X, int Y) {
         for (int k = 0; k < wgt_channels; k++) {
             for (int i = 0; i < Kx; i++) {
                 for(int j = 0; j < Ky; j++) {
-                    auto new_k = k / (X*Y);
-                    auto rem = k % (X*Y);
-                    auto new_i = rem / Y;
-                    auto new_j = rem % Y;
-                    auto index_out = K*X*Y*n + X*Y*new_k + Y*new_i + new_j;
-                    auto index_in = wgt_channels*Kx*Ky*n + Kx*Ky*k + Ky*i + j;
+                    int new_k = k / (X*Y);
+                    int rem = k % (X*Y);
+                    int new_i = rem / Y;
+                    int new_j = rem % Y;
+                    uint32_t index_out = K*X*Y*n + X*Y*new_k + Y*new_i + new_j;
+                    uint32_t index_in = wgt_channels*Kx*Ky*n + Kx*Ky*k + Ky*i + j;
                     tmp_weights[index_out] = weights[index_in];
                 }
             }
@@ -162,11 +165,11 @@ void Layer::wgt_split_4D(int K, int X, int Y) {
 
 void Layer::reshape_to_2D() {
 
-    auto batch_size = act_shape[0];
-    auto act_channels = act_shape[1];
-    auto Nx = act_shape[2];
-    auto Ny = act_shape[3];
-    auto new_act_channels = act_channels * Nx * Ny;
+    int batch_size = act_shape[0];
+    int act_channels = act_shape[1];
+    int Nx = act_shape[2];
+    int Ny = act_shape[3];
+    int new_act_channels = act_channels * Nx * Ny;
 
     act_shape.clear();
     act_shape.push_back(batch_size);
@@ -185,7 +188,7 @@ void Layer::read_layer() {
     cnpy::npy_load("net_traces/" + network + "/wgt-" + name + ".npy" , data_npy, wgt_shape);
     max_index = getMaxIndex("weights");
     weights = (float *) malloc(max_index * sizeof(float));
-    if (weights == nullptr) {
+    if (weights == NULL) {
         fprintf(stderr, "Error: Failed to allocate weights!\n");
         exit(EXIT_FAILURE);
     }
@@ -195,7 +198,7 @@ void Layer::read_layer() {
     cnpy::npy_load("net_traces/" + network + "/bias-" + name + ".npy" , data_npy, bias_shape);
     max_index = getMaxIndex("bias");
     bias = (float *) malloc(max_index * sizeof(float));
-    if (bias == nullptr) {
+    if (bias == NULL) {
         fprintf(stderr, "Error: Failed to allocate bias!\n");
         exit(EXIT_FAILURE);
     }
@@ -205,7 +208,7 @@ void Layer::read_layer() {
     cnpy::npy_load("net_traces/" + network + "/act-" + name + "-0.npy" , data_npy, act_shape);
     max_index = getMaxIndex("activations");
     activations = (float *) malloc(max_index * sizeof(float));
-    if (activations == nullptr) {
+    if (activations == NULL) {
         fprintf(stderr, "Error: Failed to allocate activations!\n");
         exit(EXIT_FAILURE);
     }
@@ -215,13 +218,14 @@ void Layer::read_layer() {
     cnpy::npy_load("net_traces/" + network + "/act-" + name + "-0-out.npy" , data_npy, out_act_shape);
     max_index = getMaxIndex("output_activations");
     output_activations = (float *) malloc(max_index * sizeof(float));
-    if (output_activations == nullptr) {
+    if (output_activations == NULL) {
         fprintf(stderr, "Error: Failed to allocate output activations!\n");
         exit(EXIT_FAILURE);
     }
     for(uint32_t i = 0; i < max_index; i++)
         output_activations[i] = data_npy.data<float>()[i];
 
+	this->init = true;
     printf("Layer %s loaded into memory\n",name.c_str());
 
 }

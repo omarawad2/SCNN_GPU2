@@ -1,38 +1,40 @@
 #ifndef LAYER_H
 #define LAYER_H
 
-#include <cmath>
 #include <cstdio>
 #include "cnpy.h"
+#include <cstdlib>
 
 struct Layer {
 
-    std::string network = "";
+	bool init;
 
-    std::string name = "";
+    std::string network;
 
-    std::string type = "";
+    std::string name;
 
-    bool ReLU = false;
+    std::string type;
 
-    int stride = 1;
+    bool ReLU;
 
-    int padding = 0;
+    int stride;
+
+    int padding;
 
     /* numpy array containing the weights for the layer */
-    float* weights = nullptr;
+    float* weights;
     std::vector<size_t> wgt_shape;
 
     /* numpy array containing the bias for the layer */
-    float* bias = nullptr;
+    float* bias;
     std::vector<size_t> bias_shape;
 
     /* numpy array containing the activations for the layer */
-    float* activations = nullptr;
+    float* activations;
     std::vector<size_t> act_shape;
 
     /* numpy array containing the output activations for the layer */
-    float* output_activations = nullptr;
+    float* output_activations;
     std::vector<size_t> out_act_shape;
 
     Layer(const std::string &_network, const std::string &_name, const std::string &_type, bool _ReLU, int _stride,

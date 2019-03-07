@@ -40,6 +40,6 @@ cmake-*
 models
 net_traces
 results
-
+SCNN_GPU
 tensor.cu
 tensor.h

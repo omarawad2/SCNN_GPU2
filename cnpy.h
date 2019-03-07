@@ -44,20 +44,19 @@ namespace cnpy {
         {
             num_vals = 1;
             for(size_t i = 0;i < shape.size();i++) num_vals *= shape[i];
-            data_holder = std::shared_ptr<std::vector<char>>(
-                    new std::vector<char>(num_vals * word_size));
+            data_holder = std::vector<std::vector<char> >(1,std::vector<char>(num_vals * word_size));
         }
 
         NpyArray() : shape(0), word_size(0), fortran_order(0), num_vals(0) { }
 
         template<typename T>
         T* data() {
-            return reinterpret_cast<T*>(&(*data_holder)[0]);
+            return reinterpret_cast<T*>(&(data_holder[0])[0]);
         }
 
         template<typename T>
         const T* data() const {
-            return reinterpret_cast<T*>(&(*data_holder)[0]);
+            return reinterpret_cast<T*>(&(data_holder[0])[0]);
         }
 
         template<typename T>
@@ -67,10 +66,10 @@ namespace cnpy {
         }
 
         size_t num_bytes() const {
-            return data_holder->size();
+            return data_holder[0].size();
         }
 
-        std::shared_ptr<std::vector<char>> data_holder;
+        std::vector<std::vector<char> > data_holder;
         std::vector<size_t> shape;
         size_t word_size;
         bool fortran_order;
@@ -149,16 +148,22 @@ namespace cnpy {
 
     template<typename T> std::vector<char> create_npy_header(const std::vector<size_t>& shape) {
 
+		char str[32];
+		char str1[32];
         std::vector<char> dict;
         dict += "{'descr': '";
         dict += BigEndianTest();
         dict += map_type(typeid(T));
-        dict += std::to_string(sizeof(T));
+		sprintf(str, "%d", sizeof(T));
+        dict += str;
         dict += "', 'fortran_order': False, 'shape': (";
-        dict += std::to_string(shape[0]);
+		sprintf(str1, "%d", shape[0]);
+        dict += str1;
         for(size_t i = 1;i < shape.size();i++) {
+			char str2[32];
             dict += ", ";
-            dict += std::to_string(shape[i]);
+			sprintf(str2, "%d", shape[i]);
+            dict += str2;
         }
         if(shape.size() == 1) dict += ",";
         dict += "), }";
