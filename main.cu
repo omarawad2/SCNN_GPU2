@@ -105,38 +105,6 @@ __global__ void kRelu(int N, int K, int W, int H, float* d_output_activations){
     }
 }
 
-//naive implmentation
-__global__ void kComputePE(int n, int W, int H, int K, int stride, int* act_queue_size, const float* d_act_queue, const int* d_act_queue_x, 
-    const int* d_act_queue_y, int* wgt_queue_size, const float* d_wgt_queue, const int* d_wgt_queue_k,
-    const int* d_wgt_queue_r, const int* d_wgt_queue_s, float* d_output_activations){
-    //TODO: use shared mem.
-    //TODO: try different configurations
-
-    int ff = threadIdx.x + blockIdx.x*blockDim.x;
-    int ii = threadIdx.y + blockIdx.y*blockDim.y;
-
-    if(ii < *act_queue_size && ff < *wgt_queue_size){
-        float act = d_act_queue[ii];
-        int x = d_act_queue_x[ii];
-        int y = d_act_queue_y[ii];
-
-        float wgt = d_wgt_queue[ff];
-        int k = d_wgt_queue_k[ff];
-        int r = d_wgt_queue_r[ff];
-        int s = d_wgt_queue_s[ff];
-
-        //TODO: try to remove div. (takes a lot on GPU)
-        int w = (x-r)/stride;
-        int h = (y-s)/stride;
-
-         if(w >= 0 && w < W && h >= 0 && h < H) {
-                int pos = n * W * H * K + k * W * H + w * H + h;
-                //TODO: memory access not coalesced
-                d_output_activations[pos] += act * wgt;
-            }
-    }
-}
-
 //naive implementation
 __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int sy, int C, int X, int Y, int stride,
         const float* d_act,float* d_act_queue, int* d_act_queue_x, int* d_act_queue_y, int* act_queue_count) {
@@ -185,6 +153,38 @@ __global__ void kPopulate_effectual_weights(int Kc, int ck, int sx, int sy,int k
                 }
             }
         }
+    }
+}
+
+//naive implmentation
+__global__ void kComputePE(int n, int W, int H, int K, int stride, int* act_queue_size, const float* d_act_queue, const int* d_act_queue_x, 
+    const int* d_act_queue_y, int* wgt_queue_size, const float* d_wgt_queue, const int* d_wgt_queue_k,
+    const int* d_wgt_queue_r, const int* d_wgt_queue_s, float* d_output_activations){
+    //TODO: use shared mem.
+    //TODO: try different configurations
+
+    int ff = threadIdx.x + blockIdx.x*blockDim.x;
+    int ii = threadIdx.y + blockIdx.y*blockDim.y;
+
+    if(ii < *act_queue_size && ff < *wgt_queue_size){
+        float act = d_act_queue[ii];
+        int x = d_act_queue_x[ii];
+        int y = d_act_queue_y[ii];
+
+        float wgt = d_wgt_queue[ff];
+        int k = d_wgt_queue_k[ff];
+        int r = d_wgt_queue_r[ff];
+        int s = d_wgt_queue_s[ff];
+
+        //TODO: try to remove div. (takes a lot on GPU)
+        int w = (x-r)/stride;
+        int h = (y-s)/stride;
+
+         if(w >= 0 && w < W && h >= 0 && h < H) {
+                int pos = n * W * H * K + k * W * H + w * H + h;
+                //TODO: memory access not coalesced
+                atomicAdd(d_output_activations + pos, act * wgt);
+            }
     }
 }
 
@@ -304,22 +304,22 @@ void populate_effectual_weights(int ck, int sx, int sy, int Kc, int k_begin, int
     #endif
 }
 
-/*
-void computePE(int n, int W, int H, int K, int stride, const float* d_act_queue, const int* d_act_queue_x,
-               const int* d_act_queue_y, int* act_queue_size, const float* d_wgt_queue, const int* d_wgt_queue_k,
-               const int* d_wgt_queue_r, const int* d_wgt_queue_s, int* wgt_queue_size, float* d_output_activations) {
+void computePE(int n, int W, int H, int K, int stride, int act_queue_size, int wgt_queue_size, const float* d_act_queue,
+		const int* d_act_queue_x, const int* d_act_queue_y, int* d_act_queue_size, const float* d_wgt_queue, 
+		const int* d_wgt_queue_k, const int* d_wgt_queue_r, const int* d_wgt_queue_s, int* d_wgt_queue_size, 
+		float* d_output_activations) {
 
     #ifndef GLOBAL_TIME
     double timeStampA = getTimeStamp();
     #endif
 
     dim3 block(32, 32);
-    dim3 grid((*wgt_queue_size+block.x-1)/block.x,(*act_queue_size+block.y-1)/block.y);
+    dim3 grid((wgt_queue_size+block.x-1)/block.x,(act_queue_size+block.y-1)/block.y);
     check_grid(grid,"computePE");
 
-    kComputePE<<<grid,block>>>(n,W,H,K,stride,act_queue_size,d_act_queue,d_act_queue_x,d_act_queue_y,wgt_queue_size,d_wgt_queue,
-        d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,d_output_activations);
-
+    kComputePE<<<grid,block>>>(n,W,H,K,stride,d_act_queue_size,d_act_queue,d_act_queue_x,d_act_queue_y,d_wgt_queue_size,
+			d_wgt_queue,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,d_output_activations);
+    cudaDeviceSynchronize();
 
     #ifndef GLOBAL_TIME
     double timeStampB = getTimeStamp();
@@ -327,42 +327,6 @@ void computePE(int n, int W, int H, int K, int stride, const float* d_act_queue,
     printf("kComputePE time %.6f\n",(timeStampB-timeStampA));
     #endif
 
-}*/
-
-void computePE(int n, int W, int H, int K, int stride, const float* act_queue, const int* act_queue_x,
-               const int* act_queue_y, uint64_t act_queue_size, const float* wgt_queue, const int* wgt_queue_k,
-               const int* wgt_queue_r, const int* wgt_queue_s, uint64_t wgt_queue_size, float* output_activations) {
-
-    for(uint64_t i = 0; i < act_queue_size; i+=4) {
-        for(uint64_t f = 0; f < wgt_queue_size; f+=4) {
-
-            for(uint64_t ii = i; ii < std::min(i + 4, act_queue_size); ii++) {
-                for(uint64_t ff = f; ff < std::min(f + 4, wgt_queue_size); ff++) {
-
-                    float act = act_queue[ii];
-                    int x = act_queue_x[ii];
-                    int y = act_queue_y[ii];
-
-                    float wgt = wgt_queue[ff];
-                    int k = wgt_queue_k[ff];
-                    int r = wgt_queue_r[ff];
-                    int s = wgt_queue_s[ff];
-
-                    int w = (x - r) / stride;
-                    int h = (y - s) / stride;
-
-                    if(w >= 0 && w < W && h >= 0 && h < H) {
-                        int pos = n * W * H * K + k * W * H + w * H + h;
-
-                        #pragma omp atomic
-                        output_activations[pos] += act * wgt;
-                    }
-
-                }
-            }
-
-        }
-    }
 }
 
 void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int W, int H, int R, int S,
@@ -399,7 +363,8 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
             // Populate activations queue
             int act_queue_count = 0;
             int *d_act_queue_count = host2Dev(1,&act_queue_count,"allocate activations queue count");
-            populate_effectual_activations(n,ct+ck,sx,sy,stride,layer,d_act_queue,d_act_queue_x,d_act_queue_y,d_act_queue_count);
+            populate_effectual_activations(n,ct+ck,sx,sy,stride,layer,d_act_queue,d_act_queue_x,d_act_queue_y,
+					d_act_queue_count);
 
             // Populate weights queue
             int wgt_queue_count = 0;
@@ -407,43 +372,17 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
             populate_effectual_weights(ck,sx,sy,Kc,k_begin,k_end,stride,padding,layer,d_wgt_queue,d_wgt_queue_k,
                    d_wgt_queue_r,d_wgt_queue_s,d_wgt_queue_count);
 
-            // ###############################Remove by GPU code {
-
+			//TODO optimize count usage (computePE needs to read it from mem, and we need to read it from host
+			// in order to assign the block size
         	check_error(cudaMemcpy(&act_queue_count, d_act_queue_count, sizeof(int), cudaMemcpyDeviceToHost),
-        		"copy output activations from device to host");
+        		"copy activation queue count from device to host");
         	check_error(cudaMemcpy(&wgt_queue_count, d_wgt_queue_count, sizeof(int), cudaMemcpyDeviceToHost),
-        		"copy output activations from device to host");
+        		"copy weight queue count from device to host");
 
-            // Allocate space for the queues
-            float *act_queue = (float*) malloc(X*Y * sizeof(float));
-            int *act_queue_x = ((int*) malloc(X*Y * sizeof(int)));
-            int *act_queue_y = ((int*) malloc(X*Y * sizeof(int)));
-            float *wgt_queue = (float*) malloc(Kc*R*S * sizeof(float));
-            int *wgt_queue_k = ((int*) malloc(Kc*R*S * sizeof(int)));
-            int *wgt_queue_r = ((int*) malloc(Kc*R*S * sizeof(int)));
-            int *wgt_queue_s = ((int*) malloc(Kc*R*S * sizeof(int)));
-
-            check_error(cudaMemcpy(act_queue, d_act_queue, X*Y*sizeof(float), cudaMemcpyDeviceToHost),"");
-            check_error(cudaMemcpy(act_queue_x, d_act_queue_x, X*Y*sizeof(int), cudaMemcpyDeviceToHost),"");
-            check_error(cudaMemcpy(act_queue_y, d_act_queue_y, X*Y*sizeof(int), cudaMemcpyDeviceToHost),"");
-            check_error(cudaMemcpy(wgt_queue, d_wgt_queue, Kc*R*S*sizeof(float), cudaMemcpyDeviceToHost),"");
-            check_error(cudaMemcpy(wgt_queue_k, d_wgt_queue_k, Kc*R*S*sizeof(int), cudaMemcpyDeviceToHost),"");
-            check_error(cudaMemcpy(wgt_queue_r, d_wgt_queue_r, Kc*R*S*sizeof(int), cudaMemcpyDeviceToHost),"");
-            check_error(cudaMemcpy(wgt_queue_s, d_wgt_queue_s, Kc*R*S*sizeof(int), cudaMemcpyDeviceToHost),"");
-
-            computePE(n,W,H,K,stride,act_queue,act_queue_x,act_queue_y,act_queue_count,wgt_queue, wgt_queue_k,
-                      wgt_queue_r,wgt_queue_s, wgt_queue_count, d_output_activations);
-
-            free(act_queue);
-            free(act_queue_x);
-            free(act_queue_y);
-
-            free(wgt_queue);
-            free(wgt_queue_k);
-            free(wgt_queue_r);
-            free(wgt_queue_s);
-
-            // ###############################Remove by GPU code }
+            //do actual convolution
+            computePE(n,W,H,K,stride,act_queue_count,wgt_queue_count,d_act_queue,d_act_queue_x,d_act_queue_y,
+					d_act_queue_count,d_wgt_queue,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,d_wgt_queue_count,
+					d_output_activations);
 
             //free GPU resources
             check_error(cudaFree(d_act_queue_count),"free device activations counter");
@@ -508,43 +447,24 @@ int main(int argc, char *argv[]) {
         //tested //can be optimized
         addBias(N, K, W, H, layer, d_output_activations);
 
-        // ############################## TEST ############################################ {
-        float *h_output_activations = (float *) malloc(bytes);
-        if (h_output_activations == NULL) {
-            fprintf(stderr, "Error: Failed to allocate output activations!\n");
-            exit(EXIT_FAILURE);
-        }
-
-		check_error(cudaMemcpy(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost),
-                    "copy output activations from device to host");
-
-        // ############################## TEST ############################################ }
-
         //core compute
         for(int n = 0; n < N; n++) {
             kc = n;
             for(int ct = 0; ct < C; ct+=Ck) {
                 for(int ck = 0; ck < Ck; ck++) {
-                    computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,h_output_activations);
-                    //computeTile(n,ct,ck,kc,Kc,K,W,H,layer,d_output_activations);
-                        //test
+                    computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,d_output_activations);
                 }
                 kc += Kc;
             }
         }
 
-        // ############################## TEST ############################################ }
-
-        check_error(cudaMemcpy(d_output_activations, h_output_activations, bytes, cudaMemcpyHostToDevice),
-                    "copy output activations from device to host");
-
         relu(N, K, W, H, layer, d_output_activations);
 
-        /*float *h_output_activations = (float *) malloc(bytes);
+        float *h_output_activations = (float *) malloc(bytes);
         if (h_output_activations == NULL) {
             fprintf(stderr, "Error: Failed to allocate output activations!\n");
             exit(EXIT_FAILURE);
-        }*/
+        }
 
         check_error(cudaMemcpy(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost),
         		"copy output activations from device to host");
