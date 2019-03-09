@@ -187,7 +187,8 @@ void Layer::read_layer() {
 
     cnpy::npy_load("net_traces/" + network + "/wgt-" + name + ".npy" , data_npy, wgt_shape);
     max_index = getMaxIndex("weights");
-    cudaMallocHost((void**) &weights, max_index * sizeof(float));
+    weights = (float *) malloc(max_index * sizeof(float));
+    //cudaHostAlloc((void **) &weights, max_index * sizeof(float), cudaHostAllocDefault);
     if (weights == NULL) {
         fprintf(stderr, "Error: Failed to allocate weights!\n");
         exit(EXIT_FAILURE);

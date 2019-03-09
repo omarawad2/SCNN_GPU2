@@ -1,9 +1,11 @@
 #ifndef LAYER_H
 #define LAYER_H
 
-#include <cstdio>
 #include "cnpy.h"
-#include <cstdlib>
+#include <cuda.h>
+#include <stdio.h>
+#include <assert.h>
+#include <stdlib.h>
 
 struct Layer {
 
