@@ -362,6 +362,7 @@ void computeTile(int C, int X, int Y, int Ck, int R, int S, int n, int ct, int c
 
             // Populate activations queue
             int* act_queue_count;
+            //unified mem. access
             check_error(cudaMallocManaged((void **)&act_queue_count, sizeof(int)),"allocate activations queue count");
             populate_effectual_activations(n,ct+ck,sx,sy,stride,layer,d_act_queue,d_act_queue_x,d_act_queue_y,act_queue_count);
 
@@ -385,10 +386,8 @@ void computeTile(int C, int X, int Y, int Ck, int R, int S, int n, int ct, int c
             check_error(cudaFree(d_wgt_queue_k),"free device weights queue K dim");
             check_error(cudaFree(d_wgt_queue_r),"free device weights queue R dim");
             check_error(cudaFree(d_wgt_queue_s),"free device weights queue S dim");
-
         }
     }
-
 }
 
 //############################################### Main #################################################################
@@ -456,6 +455,17 @@ int main(int argc, char *argv[]) {
                 for(int ck = 0; ck < Ck; ck++) {
                     computeTile(C,X,Y,Ck,R,S,n,ct,ck,kc,Kc,K,W,H,layer,d_output_activations);
                     //computeTile(n,ct,ck,kc,Kc,K,W,H,layer,d_output_activations);
+                        //test
+                        if(ck == 0 && i == 0){
+                            check_error(cudaMemcpy(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost),
+                                    "copy output activations from device to host");
+                            std::vector<size_t> output_shape;
+                            output_shape.push_back((unsigned) N);
+                            output_shape.push_back((unsigned) K);
+                            output_shape.push_back((unsigned) W);
+                            output_shape.push_back((unsigned) H);
+                            cnpy::npy_save("gpu_"+layer.name,h_output_activations,output_shape);
+                        }
                 }
                 kc += Kc;
             }
@@ -473,6 +483,13 @@ int main(int argc, char *argv[]) {
 
         check_error(cudaMemcpy(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost),
         		"copy output activations from device to host");
+        //test
+       /* std::vector<size_t> output_shape;
+        output_shape.push_back((unsigned) N);
+        output_shape.push_back((unsigned) K);
+        output_shape.push_back((unsigned) W);
+        output_shape.push_back((unsigned) H);
+        cnpy::npy_save("gpu_"+layer.name,h_output_activations,output_shape);*/
 
         check_values(layer,h_output_activations);
         free(h_output_activations);

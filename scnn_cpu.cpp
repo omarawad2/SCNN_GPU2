@@ -502,7 +502,8 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 int main(int argc, char *argv[]) {
 
     auto network = read_bvlc_alexnet();
-
+    //test
+    int i = 0;
     for(auto layer : network) {
 
         read_layer(layer);
@@ -571,6 +572,16 @@ int main(int argc, char *argv[]) {
                 #pragma omp parallel for private(ck)
                 for(ck = 0; ck < Ck; ck++) {
                     computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,output_activations);
+                        //test
+                        if(ck == 0 && i == 0){
+                            std::vector<size_t> output_shape;
+                            output_shape.push_back((unsigned) N);
+                            output_shape.push_back((unsigned) K);
+                            output_shape.push_back((unsigned) W);
+                            output_shape.push_back((unsigned) H);
+                            cnpy::npy_save("cpu_"+layer.name,output_activations,output_shape);
+                        }
+                        i++;
                 }
                 kc += Kc;
             }
