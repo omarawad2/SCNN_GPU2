@@ -330,7 +330,8 @@ void computePE(int n, int W, int H, int K, int stride, int act_queue_size, int w
 }
 
 void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int W, int H, int R, int S,
-        const Layer &layer, float* d_output_activations) {
+        const Layer &layer, float* d_output_activations, float* d_act_queue, float* d_wgt_queue, int* d_act_queue_x,
+        int* d_act_queue_y, int* d_wgt_queue_k, int* d_wgt_queue_r, int* d_wgt_queue_s) {
 
     int padding = layer.padding;
     int stride = layer.stride;
@@ -343,22 +344,6 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
     // Iterate strides
     for(int sx = 0; sx < stride; sx++) {
         for(int sy = 0; sy < stride; sy++) {
-
-            float *d_act_queue, *d_wgt_queue;
-            int *d_act_queue_x, *d_act_queue_y;
-            int *d_wgt_queue_k, *d_wgt_queue_r, *d_wgt_queue_s;
-
-            // Allocate space for the queues on device 
-            //TODO: reuse the queues instead of allocating and deallocating them each time
-            //max. size is one activation channel
-            check_error(cudaMalloc((void**) &d_act_queue, X*Y*sizeof(float)),"allocate device activations queue");
-            check_error(cudaMalloc((void**) &d_act_queue_x, X*Y*sizeof(int)),"allocate device activations queue X dim");
-            check_error(cudaMalloc((void**) &d_act_queue_y, X*Y*sizeof(int)),"allocate device activations queue Y dim");
-            //max. size is the numebr of kernel channels processed in parallel with each activation channel
-            check_error(cudaMalloc((void**) &d_wgt_queue, Kc*R*S*sizeof(float)),"allocate device weights queue");
-            check_error(cudaMalloc((void**) &d_wgt_queue_k, Kc*R*S*sizeof(int)),"allocate device weights queue K filter");
-            check_error(cudaMalloc((void**) &d_wgt_queue_r, Kc*R*S*sizeof(int)),"allocate device weights queue R dim");
-            check_error(cudaMalloc((void**) &d_wgt_queue_s, Kc*R*S*sizeof(int)),"allocate device weights queue S dim");
 
             // Populate activations queue
             int act_queue_count = 0;
@@ -387,13 +372,6 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
             //free GPU resources
             check_error(cudaFree(d_act_queue_count),"free device activations counter");
             check_error(cudaFree(d_wgt_queue_count),"free device weights counter");
-            check_error(cudaFree(d_act_queue),"free device activations queue");
-            check_error(cudaFree(d_act_queue_x),"free device activations queue X dim");
-            check_error(cudaFree(d_act_queue_y),"free device activations queue Y dim");
-            check_error(cudaFree(d_wgt_queue),"free device weights queue");
-            check_error(cudaFree(d_wgt_queue_k),"free device weights queue K dim");
-            check_error(cudaFree(d_wgt_queue_r),"free device weights queue R dim");
-            check_error(cudaFree(d_wgt_queue_s),"free device weights queue S dim");
         }
     }
 }
@@ -407,7 +385,6 @@ int main(int argc, char *argv[]) {
     for(int i = 0; i < network.size(); i++) {
 
     Layer layer = network[i];
-    //cudaHostAlloc((void **) &layer.weights, layer.getMaxIndex("weights") * sizeof(float), cudaHostAllocDefault);
     
         layer.read_layer();
 
@@ -448,16 +425,41 @@ int main(int argc, char *argv[]) {
         //tested
         addBias(N, K, W, H, layer, d_output_activations);
 
-        //core compute
+        ////////core compute/////////////
+        // Allocate space for the queues on device (allocate once and reuse)
+        float *d_act_queue, *d_wgt_queue;
+        int *d_act_queue_x, *d_act_queue_y;
+        int *d_wgt_queue_k, *d_wgt_queue_r, *d_wgt_queue_s;
+        //max. size is one activation channel
+        check_error(cudaMalloc((void**) &d_act_queue, X*Y*sizeof(float)),"allocate device activations queue");
+        check_error(cudaMalloc((void**) &d_act_queue_x, X*Y*sizeof(int)),"allocate device activations queue X dim");
+        check_error(cudaMalloc((void**) &d_act_queue_y, X*Y*sizeof(int)),"allocate device activations queue Y dim");
+        //max. size is the numebr of kernel channels processed in parallel with each activation channel
+        check_error(cudaMalloc((void**) &d_wgt_queue, Kc*R*S*sizeof(float)),"allocate device weights queue");
+        check_error(cudaMalloc((void**) &d_wgt_queue_k, Kc*R*S*sizeof(int)),"allocate device weights queue K filter");
+        check_error(cudaMalloc((void**) &d_wgt_queue_r, Kc*R*S*sizeof(int)),"allocate device weights queue R dim");
+        check_error(cudaMalloc((void**) &d_wgt_queue_s, Kc*R*S*sizeof(int)),"allocate device weights queue S dim");
+
         for(int n = 0; n < N; n++) {
             kc = n;
             for(int ct = 0; ct < C; ct+=Ck) {
                 for(int ck = 0; ck < Ck; ck++) {
-                    computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,d_output_activations);
+                    computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,d_output_activations,d_act_queue,d_wgt_queue,d_act_queue_x,
+                        d_act_queue_y,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s);
                 }
                 kc += Kc;
             }
         }
+
+        //free GPU resources
+        check_error(cudaFree(d_act_queue),"free device activations queue");
+        check_error(cudaFree(d_act_queue_x),"free device activations queue X dim");
+        check_error(cudaFree(d_act_queue_y),"free device activations queue Y dim");
+        check_error(cudaFree(d_wgt_queue),"free device weights queue");
+        check_error(cudaFree(d_wgt_queue_k),"free device weights queue K dim");
+        check_error(cudaFree(d_wgt_queue_r),"free device weights queue R dim");
+        check_error(cudaFree(d_wgt_queue_s),"free device weights queue S dim");
+        ///////////////////////////
 
         relu(N, K, W, H, layer, d_output_activations);
 
