@@ -151,10 +151,10 @@ __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int 
             int pos = C*X*Y*n + X*Y*channel + x*Y + y;
             float act_bits = d_act[pos];
             if(act_bits !=0 && sx == tmp_sx && sy == tmp_sy){
-                d_act_queue[*act_queue_count] = act_bits;
-                d_act_queue_x[*act_queue_count] = x;
-                d_act_queue_y[*act_queue_count] = y;
-                atomicAdd(act_queue_count,1);
+				int index = atomicAdd(act_queue_count,1);
+				d_act_queue[index] = act_bits;
+                d_act_queue_x[index] = x;
+                d_act_queue_y[index] = y;
             }
         }
     }
@@ -176,12 +176,12 @@ __global__ void kPopulate_effectual_weights(int Kc, int ck, int sx, int sy,int k
             if(k < k_end){
                 int pos = Ck*R*S*k + R*S*ck + r*S + s;
                 float wgt_bits = d_wgt[pos];
-                if(wgt_bits != 0 && sx == tmp_sx && sy == tmp_sy){           
-                    d_wgt_queue[*wgt_queue_count] = wgt_bits;
-                    d_wgt_queue_k[*wgt_queue_count] = k;
-                    d_wgt_queue_r[*wgt_queue_count] = r;
-                    d_wgt_queue_s[*wgt_queue_count] = s;
-                    atomicAdd(wgt_queue_count,1);
+                if(wgt_bits != 0 && sx == tmp_sx && sy == tmp_sy){ 
+                    int index = atomicAdd(wgt_queue_count,1);          
+                    d_wgt_queue[index] = wgt_bits;
+                    d_wgt_queue_k[index] = k;
+                    d_wgt_queue_r[index] = r;
+                    d_wgt_queue_s[index] = s;
                 }
             }
         }
@@ -248,9 +248,8 @@ void populate_effectual_activations(int n, int channel, int sx, int sy, int stri
     int X = (int) layer.act_shape[2];
     int Y = (int) layer.act_shape[3];
 
-    //allocate only one channel
-    //check
-    float *d_act = host2Dev(X*Y, layer.activations+n*C*X*Y+channel*X*Y,"allocate device activations channel");
+    //TODO:allocate only one channel
+    float* d_act = host2Dev(layer.getMaxIndex("activations"), layer.activations,"allocate device activations channel");
 
     dim3 block(32, 32);
     dim3 grid((Y+block.x-1)/block.x,(X+block.y-1)/block.y);
@@ -305,6 +304,7 @@ void populate_effectual_weights(int ck, int sx, int sy, int Kc, int k_begin, int
     #endif
 }
 
+/*
 void computePE(int n, int W, int H, int K, int stride, const float* d_act_queue, const int* d_act_queue_x,
                const int* d_act_queue_y, int* act_queue_size, const float* d_wgt_queue, const int* d_wgt_queue_k,
                const int* d_wgt_queue_r, const int* d_wgt_queue_s, int* wgt_queue_size, float* d_output_activations) {
@@ -327,10 +327,46 @@ void computePE(int n, int W, int H, int K, int stride, const float* d_act_queue,
     printf("kComputePE time %.6f\n",(timeStampB-timeStampA));
     #endif
 
+}*/
+
+void computePE(int n, int W, int H, int K, int stride, const float* act_queue, const int* act_queue_x,
+               const int* act_queue_y, uint64_t act_queue_size, const float* wgt_queue, const int* wgt_queue_k,
+               const int* wgt_queue_r, const int* wgt_queue_s, uint64_t wgt_queue_size, float* output_activations) {
+
+    for(uint64_t i = 0; i < act_queue_size; i+=4) {
+        for(uint64_t f = 0; f < wgt_queue_size; f+=4) {
+
+            for(uint64_t ii = i; ii < std::min(i + 4, act_queue_size); ii++) {
+                for(uint64_t ff = f; ff < std::min(f + 4, wgt_queue_size); ff++) {
+
+                    float act = act_queue[ii];
+                    int x = act_queue_x[ii];
+                    int y = act_queue_y[ii];
+
+                    float wgt = wgt_queue[ff];
+                    int k = wgt_queue_k[ff];
+                    int r = wgt_queue_r[ff];
+                    int s = wgt_queue_s[ff];
+
+                    int w = (x - r) / stride;
+                    int h = (y - s) / stride;
+
+                    if(w >= 0 && w < W && h >= 0 && h < H) {
+                        int pos = n * W * H * K + k * W * H + w * H + h;
+
+                        #pragma omp atomic
+                        output_activations[pos] += act * wgt;
+                    }
+
+                }
+            }
+
+        }
+    }
 }
 
-void computeTile(int C, int X, int Y, int Ck, int R, int S, int n, int ct, int ck, int kc, int Kc, int K, int W, int H, const Layer &layer,
-        float* d_output_activations) {
+void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int W, int H, int R, int S,
+        const Layer &layer, float* d_output_activations) {
 
     int padding = layer.padding;
     int stride = layer.stride;
@@ -361,24 +397,57 @@ void computeTile(int C, int X, int Y, int Ck, int R, int S, int n, int ct, int c
             check_error(cudaMalloc((void**) &d_wgt_queue_s, Kc*R*S*sizeof(int)),"allocate device weights queue S dim");
 
             // Populate activations queue
-            int* act_queue_count;
-            //unified mem. access
-            check_error(cudaMallocManaged((void **)&act_queue_count, sizeof(int)),"allocate activations queue count");
-            populate_effectual_activations(n,ct+ck,sx,sy,stride,layer,d_act_queue,d_act_queue_x,d_act_queue_y,act_queue_count);
+            int act_queue_count = 0;
+            int *d_act_queue_count = host2Dev(1,&act_queue_count,"allocate activations queue count");
+            populate_effectual_activations(n,ct+ck,sx,sy,stride,layer,d_act_queue,d_act_queue_x,d_act_queue_y,d_act_queue_count);
 
             // Populate weights queue
-            int* wgt_queue_count;
-            check_error(cudaMallocManaged((void **)&wgt_queue_count, sizeof(int)),"allocate weights queue count");
+            int wgt_queue_count = 0;
+            int *d_wgt_queue_count = host2Dev(1,&act_queue_count,"allocate weights queue count");
             populate_effectual_weights(ck,sx,sy,Kc,k_begin,k_end,stride,padding,layer,d_wgt_queue,d_wgt_queue_k,
-                   d_wgt_queue_r,d_wgt_queue_s,wgt_queue_count);
+                   d_wgt_queue_r,d_wgt_queue_s,d_wgt_queue_count);
 
-            //do actual convolution
-            computePE(n,W,H,K,stride,d_act_queue,d_act_queue_x,d_act_queue_y,act_queue_count,d_wgt_queue,d_wgt_queue_k,
-                      d_wgt_queue_r,d_wgt_queue_s,wgt_queue_count,d_output_activations);
+            // ###############################Remove by GPU code {
+
+        	check_error(cudaMemcpy(&act_queue_count, d_act_queue_count, sizeof(int), cudaMemcpyDeviceToHost),
+        		"copy output activations from device to host");
+        	check_error(cudaMemcpy(&wgt_queue_count, d_wgt_queue_count, sizeof(int), cudaMemcpyDeviceToHost),
+        		"copy output activations from device to host");
+
+            // Allocate space for the queues
+            float *act_queue = (float*) malloc(X*Y * sizeof(float));
+            int *act_queue_x = ((int*) malloc(X*Y * sizeof(int)));
+            int *act_queue_y = ((int*) malloc(X*Y * sizeof(int)));
+            float *wgt_queue = (float*) malloc(Kc*R*S * sizeof(float));
+            int *wgt_queue_k = ((int*) malloc(Kc*R*S * sizeof(int)));
+            int *wgt_queue_r = ((int*) malloc(Kc*R*S * sizeof(int)));
+            int *wgt_queue_s = ((int*) malloc(Kc*R*S * sizeof(int)));
+
+            check_error(cudaMemcpy(act_queue, d_act_queue, X*Y*sizeof(float), cudaMemcpyDeviceToHost),"");
+            check_error(cudaMemcpy(act_queue_x, d_act_queue_x, X*Y*sizeof(int), cudaMemcpyDeviceToHost),"");
+            check_error(cudaMemcpy(act_queue_y, d_act_queue_y, X*Y*sizeof(int), cudaMemcpyDeviceToHost),"");
+            check_error(cudaMemcpy(wgt_queue, d_wgt_queue, Kc*R*S*sizeof(float), cudaMemcpyDeviceToHost),"");
+            check_error(cudaMemcpy(wgt_queue_k, d_wgt_queue_k, Kc*R*S*sizeof(int), cudaMemcpyDeviceToHost),"");
+            check_error(cudaMemcpy(wgt_queue_r, d_wgt_queue_r, Kc*R*S*sizeof(int), cudaMemcpyDeviceToHost),"");
+            check_error(cudaMemcpy(wgt_queue_s, d_wgt_queue_s, Kc*R*S*sizeof(int), cudaMemcpyDeviceToHost),"");
+
+            computePE(n,W,H,K,stride,act_queue,act_queue_x,act_queue_y,act_queue_count,wgt_queue, wgt_queue_k,
+                      wgt_queue_r,wgt_queue_s, wgt_queue_count, d_output_activations);
+
+            free(act_queue);
+            free(act_queue_x);
+            free(act_queue_y);
+
+            free(wgt_queue);
+            free(wgt_queue_k);
+            free(wgt_queue_r);
+            free(wgt_queue_s);
+
+            // ###############################Remove by GPU code }
 
             //free GPU resources
-            check_error(cudaFree(act_queue_count),"free device activations counter");
-            check_error(cudaFree(wgt_queue_count),"free device weights counter");
+            check_error(cudaFree(d_act_queue_count),"free device activations counter");
+            check_error(cudaFree(d_wgt_queue_count),"free device weights counter");
             check_error(cudaFree(d_act_queue),"free device activations queue");
             check_error(cudaFree(d_act_queue_x),"free device activations queue X dim");
             check_error(cudaFree(d_act_queue_y),"free device activations queue Y dim");
@@ -446,6 +515,9 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
 
+		check_error(cudaMemcpy(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost),
+                    "copy output activations from device to host");
+
         // ############################## TEST ############################################ }
 
         //core compute
@@ -453,25 +525,18 @@ int main(int argc, char *argv[]) {
             kc = n;
             for(int ct = 0; ct < C; ct+=Ck) {
                 for(int ck = 0; ck < Ck; ck++) {
-                    computeTile(C,X,Y,Ck,R,S,n,ct,ck,kc,Kc,K,W,H,layer,d_output_activations);
+                    computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,h_output_activations);
                     //computeTile(n,ct,ck,kc,Kc,K,W,H,layer,d_output_activations);
                         //test
-                        if(ck == 0 && i == 0){
-                            check_error(cudaMemcpy(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost),
-                                    "copy output activations from device to host");
-                            std::vector<size_t> output_shape;
-                            output_shape.push_back((unsigned) N);
-                            output_shape.push_back((unsigned) K);
-                            output_shape.push_back((unsigned) W);
-                            output_shape.push_back((unsigned) H);
-                            cnpy::npy_save("gpu_"+layer.name,h_output_activations,output_shape);
-                        }
                 }
                 kc += Kc;
             }
         }
 
         // ############################## TEST ############################################ }
+
+        check_error(cudaMemcpy(d_output_activations, h_output_activations, bytes, cudaMemcpyHostToDevice),
+                    "copy output activations from device to host");
 
         relu(N, K, W, H, layer, d_output_activations);
 
@@ -483,13 +548,6 @@ int main(int argc, char *argv[]) {
 
         check_error(cudaMemcpy(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost),
         		"copy output activations from device to host");
-        //test
-       /* std::vector<size_t> output_shape;
-        output_shape.push_back((unsigned) N);
-        output_shape.push_back((unsigned) K);
-        output_shape.push_back((unsigned) W);
-        output_shape.push_back((unsigned) H);
-        cnpy::npy_save("gpu_"+layer.name,h_output_activations,output_shape);*/
 
         check_values(layer,h_output_activations);
         free(h_output_activations);
