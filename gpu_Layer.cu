@@ -10,10 +10,10 @@ Layer::Layer(const std::string &_network, const std::string &_name, const std::s
 
 Layer::~Layer() {
 	if(init) {
-		free(weights);
-		free(bias);
-		free(activations);
-		free(output_activations);
+		cudaFreeHost(weights);
+		cudaFreeHost(bias);
+		cudaFreeHost(activations);
+		cudaFreeHost(output_activations);
 	}
 }
 
@@ -50,7 +50,8 @@ void Layer::zero_pad() {
     int new_Ny = Ny + 2*padding;
 
     uint64_t new_max_index = batch_size * act_channels * new_Nx * new_Ny;
-    float *tmp_activations = (float *) malloc(new_max_index * sizeof(float));
+    float* tmp_activations;
+    cudaMallocHost((void **) &tmp_activations, new_max_index * sizeof(float));
     if (tmp_activations == NULL) {
         fprintf(stderr, "Error: Failed to allocate padded activations!\n");
         exit(EXIT_FAILURE);
@@ -73,7 +74,7 @@ void Layer::zero_pad() {
         }
     }
 
-    free(activations);
+    cudaFreeHost(activations);
     activations = tmp_activations;
     act_shape.clear();
     act_shape.push_back(batch_size);
@@ -91,7 +92,8 @@ void Layer::act_split_4D(int K, int X, int Y) {
     int Ny = act_shape[3];
 
     uint64_t new_max_index = batch_size * K * X * Y;
-    float *tmp_activations = (float *) malloc(new_max_index * sizeof(float));
+    float* tmp_activations;
+    cudaMallocHost((void **) &tmp_activations, new_max_index * sizeof(float));
     if (tmp_activations == NULL) {
         fprintf(stderr, "Error: Failed to allocate padded activations!\n");
         exit(EXIT_FAILURE);
@@ -113,7 +115,7 @@ void Layer::act_split_4D(int K, int X, int Y) {
         }
     }
 
-    free(activations);
+    cudaFreeHost(activations);
     activations = tmp_activations;
     act_shape.clear();
     act_shape.push_back(batch_size);
@@ -131,7 +133,8 @@ void Layer::wgt_split_4D(int K, int X, int Y) {
     int Ky = wgt_shape[3];
 
     uint64_t new_max_index = num_filters * K * X * Y;
-    float *tmp_weights = (float *) malloc(new_max_index * sizeof(float));
+    float* tmp_weights;
+    cudaMallocHost((void **) &tmp_weights, new_max_index * sizeof(float));
     if (tmp_weights == NULL) {
         fprintf(stderr, "Error: Failed to allocate padded weights!\n");
         exit(EXIT_FAILURE);
@@ -153,7 +156,7 @@ void Layer::wgt_split_4D(int K, int X, int Y) {
         }
     }
 
-    free(weights);
+    cudaFreeHost(weights);
     weights = tmp_weights;
     wgt_shape.clear();
     wgt_shape.push_back(num_filters);
@@ -179,6 +182,15 @@ void Layer::reshape_to_2D() {
 
 }
 
+inline
+cudaError_t check_error(cudaError_t err, std::string task) {
+  if (err != cudaSuccess) {
+    fprintf(stderr, "Error: Failed to %s (error code: %s)!\n", task.c_str(), cudaGetErrorString(err));
+    exit(EXIT_FAILURE);
+  }
+  return err;
+}
+
 // Read network from numpy arrays
 void Layer::read_layer() {
 
@@ -187,41 +199,29 @@ void Layer::read_layer() {
 
     cnpy::npy_load("net_traces/" + network + "/wgt-" + name + ".npy" , data_npy, wgt_shape);
     max_index = getMaxIndex("weights");
-    cudaMallocHost((void**) &weights, max_index * sizeof(float));
-    if (weights == NULL) {
-        fprintf(stderr, "Error: Failed to allocate weights!\n");
-        exit(EXIT_FAILURE);
-    }
+    check_error(cudaMallocHost((void **) &weights, max_index * sizeof(float)),"allocate layer weights");
+
     for(uint32_t i = 0; i < max_index; i++)
         weights[i] = data_npy.data<float>()[i];
 
     cnpy::npy_load("net_traces/" + network + "/bias-" + name + ".npy" , data_npy, bias_shape);
     max_index = getMaxIndex("bias");
-    bias = (float *) malloc(max_index * sizeof(float));
-    if (bias == NULL) {
-        fprintf(stderr, "Error: Failed to allocate bias!\n");
-        exit(EXIT_FAILURE);
-    }
+    check_error(cudaMallocHost((void **) &bias, max_index * sizeof(float)),"allocate layer bias");
+
     for(uint32_t i = 0; i < max_index; i++)
         bias[i] = data_npy.data<float>()[i];
 
     cnpy::npy_load("net_traces/" + network + "/act-" + name + "-0.npy" , data_npy, act_shape);
     max_index = getMaxIndex("activations");
-    activations = (float *) malloc(max_index * sizeof(float));
-    if (activations == NULL) {
-        fprintf(stderr, "Error: Failed to allocate activations!\n");
-        exit(EXIT_FAILURE);
-    }
+    check_error(cudaMallocHost((void **) &activations, max_index * sizeof(float)),"allocate layer activations");
+
     for(uint32_t i = 0; i < max_index; i++)
         activations[i] = data_npy.data<float>()[i];
 
     cnpy::npy_load("net_traces/" + network + "/act-" + name + "-0-out.npy" , data_npy, out_act_shape);
     max_index = getMaxIndex("output_activations");
-    output_activations = (float *) malloc(max_index * sizeof(float));
-    if (output_activations == NULL) {
-        fprintf(stderr, "Error: Failed to allocate output activations!\n");
-        exit(EXIT_FAILURE);
-    }
+    check_error(cudaMallocHost((void **) &output_activations, max_index * sizeof(float)),"allocate layer output activations");
+
     for(uint32_t i = 0; i < max_index; i++)
         output_activations[i] = data_npy.data<float>()[i];
 
