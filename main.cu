@@ -63,7 +63,7 @@ T* host2Dev(uint64_t size, const T *h_data, std::string task){
 }
 
 // Checking function
-void check_values(const Layer &layer, const float* output_activations, float min_error = 0.01) {
+void check_values(const Layer &layer, const float *output_activations, float min_error = 0.01) {
 
 	#ifdef VERBOSE
     printf("Checking values for layer: %s of type %s\n",layer.name.c_str(),layer.type == "conv" ? "convolution" :
@@ -86,7 +86,7 @@ void check_values(const Layer &layer, const float* output_activations, float min
 //############################################### CUDA SCNN ############################################################
 
 //naive implementation
-__global__ void kAddBias(int n, int K, int W, int H, const float* d_bias, float* d_output_activations){
+__global__ void kAddBias(int n, int K, int W, int H, const float *d_bias, float *d_output_activations){
 
     int h = threadIdx.x + blockIdx.x*blockDim.x;
     int w = threadIdx.y + blockIdx.y*blockDim.y;
@@ -99,7 +99,7 @@ __global__ void kAddBias(int n, int K, int W, int H, const float* d_bias, float*
     }
 }
 
-__global__ void kRelu(int N, int K, int W, int H, float* d_output_activations){
+__global__ void kRelu(int N, int K, int W, int H, float *d_output_activations){
     
     int x = threadIdx.x + blockIdx.x*blockDim.x;
 
@@ -112,7 +112,7 @@ __global__ void kRelu(int N, int K, int W, int H, float* d_output_activations){
 
 //naive implementation
 __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int sy, int C, int X, int Y, int stride,
-        const float* d_act,float* d_act_queue, int* d_act_queue_x, int* d_act_queue_y, int* act_queue_count) {
+        const float *d_act,float *d_act_queue, int *d_act_queue_x, int *d_act_queue_y, int *act_queue_count) {
 
     int y = threadIdx.x + blockIdx.x*blockDim.x;
     int x = threadIdx.y + blockIdx.y*blockDim.y;
@@ -135,8 +135,8 @@ __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int 
 
 //naive implementation
 __global__ void kPopulate_effectual_weights(int Kc, int ck, int sx, int sy,int k_begin, int k_end, int Ck, int R, int S,
-        int stride, int padding, const float* d_wgt, float* d_wgt_queue, int* d_wgt_queue_k, int* d_wgt_queue_r,
-        int* d_wgt_queue_s, int* wgt_queue_count){
+        int stride, int padding, const float *d_wgt, float *d_wgt_queue, int *d_wgt_queue_k, int *d_wgt_queue_r,
+        int *d_wgt_queue_s, int *wgt_queue_count) {
  
     int k = threadIdx.x + blockIdx.x*blockDim.x + k_begin;
     int s = threadIdx.y + blockIdx.y*blockDim.y;
@@ -162,9 +162,9 @@ __global__ void kPopulate_effectual_weights(int Kc, int ck, int sx, int sy,int k
 }
 
 //naive implmentation
-__global__ void kComputePE(int n, int W, int H, int K, int stride, int* act_queue_size, const float* d_act_queue, const int* d_act_queue_x, 
-    const int* d_act_queue_y, int* wgt_queue_size, const float* d_wgt_queue, const int* d_wgt_queue_k,
-    const int* d_wgt_queue_r, const int* d_wgt_queue_s, float* d_output_activations){
+__global__ void kComputePE(int n, int W, int H, int K, int stride, int *act_queue_size, const float *d_act_queue, 
+		const int *d_act_queue_x, const int *d_act_queue_y, int *wgt_queue_size, const float *d_wgt_queue, 
+		const int *d_wgt_queue_k, const int *d_wgt_queue_r, const int *d_wgt_queue_s, float *d_output_activations) {
     //TODO: use shared mem.
     //TODO: try different configurations
 
@@ -196,13 +196,13 @@ __global__ void kComputePE(int n, int W, int H, int K, int stride, int* act_queu
 
 //############################################### CPU SCNN #############################################################
 
-void addBias(int N, int K, int W, int H, const Layer &layer, float* d_output_activations) {
+void addBias(int N, int K, int W, int H, const Layer &layer, float *d_output_activations) {
 
     #ifndef GLOBAL_TIME
     double timeStampA = getTimeStamp();
     #endif
 
-    float* d_bias = host2Dev(layer.getMaxIndex("bias"), layer.bias,"allocate device bias");
+    float *d_bias = host2Dev(layer.getMaxIndex("bias"), layer.bias,"allocate device bias");
 
     dim3 block(16, 16, 4);
     dim3 grid((H+block.x-1)/block.x,(W+block.y-1)/block.y,(K+block.z-1)/block.z);
@@ -222,7 +222,7 @@ void addBias(int N, int K, int W, int H, const Layer &layer, float* d_output_act
     #endif
 }
 
-void relu(int N, int K, int W, int H, const Layer &layer, float* d_output_activations) {
+void relu(int N, int K, int W, int H, const Layer &layer, float *d_output_activations) {
 
     #ifndef GLOBAL_TIME
     double timeStampA = getTimeStamp();
@@ -244,8 +244,8 @@ void relu(int N, int K, int W, int H, const Layer &layer, float* d_output_activa
     #endif
 }
 
-void populate_effectual_activations(int n, int channel, int sx, int sy, int stride, const Layer &layer,
-        float *d_act_queue, int *d_act_queue_x, int *d_act_queue_y, int* act_queue_count) {
+void populate_effectual_activations(int n, int channel, int sx, int sy, int stride, const Layer &layer, float *d_act,
+        float *d_act_queue, int *d_act_queue_x, int *d_act_queue_y, int *act_queue_count) {
 
     #ifndef GLOBAL_TIME
     double timeStampA = getTimeStamp();
@@ -256,9 +256,6 @@ void populate_effectual_activations(int n, int channel, int sx, int sy, int stri
     int X = (int) layer.act_shape[2];
     int Y = (int) layer.act_shape[3];
 
-    //TODO:allocate only one channel
-    float* d_act = host2Dev(layer.getMaxIndex("activations"), layer.activations,"allocate device activations channel");
-
     dim3 block(32, 32);
     dim3 grid((Y+block.x-1)/block.x,(X+block.y-1)/block.y);
     check_grid(grid,"populate_effectual_activations");
@@ -268,8 +265,6 @@ void populate_effectual_activations(int n, int channel, int sx, int sy, int stri
             d_act_queue_y,act_queue_count);
     cudaDeviceSynchronize();
 
-    check_error(cudaFree(d_act),"free device activations channel");
-
     #ifndef GLOBAL_TIME
     double timeStampB = getTimeStamp();
     printf("kPopulate_effectual_activations block: (%d,%d,1), grid: (%d,%d,1)\n",block.x,block.y,grid.x,grid.y);
@@ -278,8 +273,8 @@ void populate_effectual_activations(int n, int channel, int sx, int sy, int stri
 }
 
 void populate_effectual_weights(int ck, int sx, int sy, int Kc, int k_begin, int k_end, int stride, int padding,
-        const Layer &layer, float* d_wgt_queue, int* d_wgt_queue_k, int* d_wgt_queue_r,
-        int* d_wgt_queue_s, int* wgt_queue_count) {
+        const Layer &layer, float *d_wgt, float *d_wgt_queue, int *d_wgt_queue_k, int *d_wgt_queue_r, 
+		int *d_wgt_queue_s, int *wgt_queue_count) {
 
     #ifndef GLOBAL_TIME
     double timeStampA = getTimeStamp();
@@ -288,11 +283,7 @@ void populate_effectual_weights(int ck, int sx, int sy, int Kc, int k_begin, int
     //int K = (int) layer.wgt_shape[0];
     int Ck = (int) layer.wgt_shape[1];
     int R = (int) layer.wgt_shape[2];
-    int S = (int) layer.wgt_shape[3];
-
-    //TODO: allocate only one channel and only set of working weighs (two towers alexnet)
-    //should be one channel from every weight kernel (activation resuse)
-    float* d_wgt = host2Dev(layer.getMaxIndex("weights"), layer.weights,"allocate device weights channel");
+	int S = (int) layer.wgt_shape[3];
 
     dim3 block(16, 16, 4);
     dim3 grid((Kc+block.x-1)/block.x,(S+block.y-1)/block.y,(R+block.z-1)/block.z);
@@ -303,8 +294,6 @@ void populate_effectual_weights(int ck, int sx, int sy, int Kc, int k_begin, int
             d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,wgt_queue_count);
     cudaDeviceSynchronize();
 
-    check_error(cudaFree(d_wgt),"free device weights channel");
-
     #ifndef GLOBAL_TIME
     double timeStampB = getTimeStamp();
     printf("kPopulate_effectual_weights block: (%d,%d,1), grid: (%d,%d,1)\n",block.x,block.y,grid.x,grid.y);
@@ -312,10 +301,10 @@ void populate_effectual_weights(int ck, int sx, int sy, int Kc, int k_begin, int
     #endif
 }
 
-void computePE(int n, int W, int H, int K, int stride, int act_queue_size, int wgt_queue_size, const float* d_act_queue,
-        const int* d_act_queue_x, const int* d_act_queue_y, int* d_act_queue_size, const float* d_wgt_queue, 
-        const int* d_wgt_queue_k, const int* d_wgt_queue_r, const int* d_wgt_queue_s, int* d_wgt_queue_size, 
-        float* d_output_activations) {
+void computePE(int n, int W, int H, int K, int stride, int act_queue_size, int wgt_queue_size, const float *d_act_queue,
+        const int *d_act_queue_x, const int *d_act_queue_y, int *d_act_queue_size, const float *d_wgt_queue, 
+        const int *d_wgt_queue_k, const int *d_wgt_queue_r, const int *d_wgt_queue_s, int *d_wgt_queue_size, 
+        float *d_output_activations) {
 
     #ifndef GLOBAL_TIME
     double timeStampA = getTimeStamp();
@@ -338,8 +327,9 @@ void computePE(int n, int W, int H, int K, int stride, int act_queue_size, int w
 }
 
 void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int W, int H, int R, int S,
-        const Layer &layer, float* d_output_activations, float* d_act_queue, float* d_wgt_queue, int* d_act_queue_x,
-        int* d_act_queue_y, int* d_wgt_queue_k, int* d_wgt_queue_r, int* d_wgt_queue_s) {
+        const Layer &layer, float *d_output_activations, float *d_act, float *d_act_queue, float *d_wgt_queue, 
+		int *d_act_queue_x, int *d_act_queue_y, float *d_wgt, int *d_wgt_queue_k, int *d_wgt_queue_r, 
+		int *d_wgt_queue_s) {
 
     int padding = layer.padding;
     int stride = layer.stride;
@@ -356,13 +346,13 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
             // Populate activations queue
             int act_queue_count = 0;
             int *d_act_queue_count = host2Dev(1,&act_queue_count,"allocate activations queue count");
-            populate_effectual_activations(n,ct+ck,sx,sy,stride,layer,d_act_queue,d_act_queue_x,d_act_queue_y,
+            populate_effectual_activations(n,ct+ck,sx,sy,stride,layer,d_act,d_act_queue,d_act_queue_x,d_act_queue_y,
                     d_act_queue_count);
 
             // Populate weights queue
             int wgt_queue_count = 0;
             int *d_wgt_queue_count = host2Dev(1,&act_queue_count,"allocate weights queue count");
-            populate_effectual_weights(ck,sx,sy,Kc,k_begin,k_end,stride,padding,layer,d_wgt_queue,d_wgt_queue_k,
+            populate_effectual_weights(ck,sx,sy,Kc,k_begin,k_end,stride,padding,layer,d_wgt,d_wgt_queue,d_wgt_queue_k,
                    d_wgt_queue_r,d_wgt_queue_s,d_wgt_queue_count);
 
             //TODO optimize count usage (computePE needs to read it from mem, and we need to read it from host
@@ -388,7 +378,7 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 
 int main(int argc, char *argv[]) {
 
-    double ttimeStampA = getTimeStamp();
+    double total_time = 0.0;
 
     std::vector<Layer> network = read_bvlc_alexnet();
 
@@ -429,7 +419,7 @@ int main(int argc, char *argv[]) {
 
         uint32_t bytes = N*K*W*H * sizeof(float);
 
-        float* d_output_activations;
+        float *d_output_activations;
         check_error(cudaMalloc((void **) &d_output_activations, bytes),"allocate device output activations");
 
     	double timeStampA = getTimeStamp();
@@ -442,10 +432,15 @@ int main(int argc, char *argv[]) {
         float *d_act_queue, *d_wgt_queue;
         int *d_act_queue_x, *d_act_queue_y;
         int *d_wgt_queue_k, *d_wgt_queue_r, *d_wgt_queue_s;
+
+    	float *d_act = host2Dev(layer.getMaxIndex("activations"), layer.activations,"copy device activations");
+    	float *d_wgt = host2Dev(layer.getMaxIndex("weights"), layer.weights,"copy device weights channel");
+
         //max. size is one activation channel
         check_error(cudaMalloc((void**) &d_act_queue, X*Y*sizeof(float)),"allocate device activations queue");
         check_error(cudaMalloc((void**) &d_act_queue_x, X*Y*sizeof(int)),"allocate device activations queue X dim");
         check_error(cudaMalloc((void**) &d_act_queue_y, X*Y*sizeof(int)),"allocate device activations queue Y dim");
+
         //max. size is the numebr of kernel channels processed in parallel with each activation channel
         check_error(cudaMalloc((void**) &d_wgt_queue, Kc*R*S*sizeof(float)),"allocate device weights queue");
         check_error(cudaMalloc((void**) &d_wgt_queue_k, Kc*R*S*sizeof(int)),"allocate device weights queue K filter");
@@ -456,18 +451,22 @@ int main(int argc, char *argv[]) {
             kc = n;
             for(int ct = 0; ct < C; ct+=Ck) {
                 for(int ck = 0; ck < Ck; ck++) {
-                    computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,d_output_activations,d_act_queue,d_wgt_queue,d_act_queue_x,
-                        d_act_queue_y,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s);
+                    computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,d_output_activations,d_act,d_act_queue,d_wgt_queue,
+						d_act_queue_x,d_act_queue_y,d_wgt,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s);
                 }
                 kc += Kc;
             }
         }
 
         //free GPU resources
-        check_error(cudaFree(d_act_queue),"free device activations queue");
+    	check_error(cudaFree(d_act),"free device activations");
+    	check_error(cudaFree(d_wgt),"free device weights");
+        
+		check_error(cudaFree(d_act_queue),"free device activations queue");
         check_error(cudaFree(d_act_queue_x),"free device activations queue X dim");
         check_error(cudaFree(d_act_queue_y),"free device activations queue Y dim");
-        check_error(cudaFree(d_wgt_queue),"free device weights queue");
+        
+		check_error(cudaFree(d_wgt_queue),"free device weights queue");
         check_error(cudaFree(d_wgt_queue_k),"free device weights queue K dim");
         check_error(cudaFree(d_wgt_queue_r),"free device weights queue R dim");
         check_error(cudaFree(d_wgt_queue_s),"free device weights queue S dim");
@@ -483,6 +482,7 @@ int main(int argc, char *argv[]) {
 
 		double timeStampB = getTimeStamp();
 		printf("Layer %s time: %.6f\n",layer.name.c_str(),timeStampB-timeStampA);
+		total_time += timeStampB-timeStampA;
 
         check_values(layer,h_output_activations);
         cudaFreeHost(h_output_activations);
@@ -490,7 +490,7 @@ int main(int argc, char *argv[]) {
     }
 
 	double ttimeStampB = getTimeStamp();
-	printf("Total time: %.6f\n",ttimeStampB-ttimeStampA);
+	printf("Total time: %.6f\n",total_time);
 
     return 0;
 }
