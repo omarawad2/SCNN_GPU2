@@ -1,5 +1,7 @@
 # SCNN_GPU
 
+10/3/2019 Summary: Store all activations and weights on GPU memory
+
 ### CPU code compilation:
 Command line compilation. First we need to configure the project:
     

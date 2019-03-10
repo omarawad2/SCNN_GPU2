@@ -7,7 +7,7 @@
 #include <assert.h>
 #include <stdlib.h>
 
-#define VERBOSE
+//#define VERBOSE
 
 struct Layer {
 
