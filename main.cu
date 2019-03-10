@@ -388,7 +388,7 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 
 int main(int argc, char *argv[]) {
 
-    double ttimeStampA = getTimeStamp();
+    double total_time = 0.0;
 
     std::vector<Layer> network = read_bvlc_alexnet();
 
@@ -483,14 +483,14 @@ int main(int argc, char *argv[]) {
 
 		double timeStampB = getTimeStamp();
 		printf("Layer %s time: %.6f\n",layer.name.c_str(),timeStampB-timeStampA);
+		total_time += timeStampB-timeStampA;
 
         check_values(layer,h_output_activations);
         cudaFreeHost(h_output_activations);
 
     }
 
-	double ttimeStampB = getTimeStamp();
-	printf("Total time: %.6f\n",ttimeStampB-ttimeStampA);
+	printf("Total time: %.6f\n",total_time);
 
     return 0;
 }
