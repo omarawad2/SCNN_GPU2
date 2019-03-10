@@ -512,7 +512,7 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 
 int main(int argc, char *argv[]) {
 
-	std::chrono::high_resolution_clock::time_point tt1 = std::chrono::high_resolution_clock::now();
+	double total_time = 0.0;
 
     auto network = read_bvlc_alexnet();
 
@@ -600,16 +600,14 @@ int main(int argc, char *argv[]) {
         std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
 		printf("Layer %s time: %.6f\n",layer.name.c_str(),time_span.count());
+		total_time += time_span.count();
 
         check_values(layer,output_activations);
         free(output_activations);
 
     }
 
-    std::chrono::high_resolution_clock::time_point tt2 = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(tt2 - tt1);
-
-	printf("Total time: %.6f\n",time_span.count());
+	printf("Total time: %.6f\n",total_time);
 
     return 0;
 }
