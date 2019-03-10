@@ -7,6 +7,8 @@
 #include <assert.h>
 #include <stdlib.h>
 
+#define VERBOSE
+
 struct Layer {
 
 	bool init;

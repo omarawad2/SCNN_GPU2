@@ -65,14 +65,22 @@ T* host2Dev(uint64_t size, const T *h_data, std::string task){
 // Checking function
 void check_values(const Layer &layer, const float* output_activations, float min_error = 0.01) {
 
+	#ifdef VERBOSE
     printf("Checking values for layer: %s of type %s\n",layer.name.c_str(),layer.type == "conv" ? "convolution" :
             "fully connected");
+	#endif
     uint32_t count = 0;
     for(uint32_t i = 0; i < layer.getMaxIndex("output_activations"); i++) {
+		#ifdef VERBOSE
         if(fabsf(output_activations[i] - layer.output_activations[i]) > min_error) count++;
+		#else
+		assert(fabsf(output_activations[i] - layer.output_activations[i]) <= min_error);
+		#endif
     }
+	#ifdef VERBOSE
     printf("ERRORS: %u out of %lu with absolute error tolerance of %.2f\n\n",count,
             layer.getMaxIndex("output_activations"), min_error);
+	#endif
 }
 
 //############################################### CUDA SCNN ############################################################
@@ -380,11 +388,13 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 
 int main(int argc, char *argv[]) {
 
+    double ttimeStampA = getTimeStamp();
+
     std::vector<Layer> network = read_bvlc_alexnet();
 
     for(int i = 0; i < network.size(); i++) {
 
-    Layer layer = network[i];
+    	Layer layer = network[i];
     
         layer.read_layer();
 
@@ -421,6 +431,8 @@ int main(int argc, char *argv[]) {
 
         float* d_output_activations;
         check_error(cudaMalloc((void **) &d_output_activations, bytes),"allocate device output activations");
+
+    	double timeStampA = getTimeStamp();
 
         //tested
         addBias(N, K, W, H, layer, d_output_activations);
@@ -469,10 +481,16 @@ int main(int argc, char *argv[]) {
         check_error(cudaMemcpy(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost),
                 "copy output activations from device to host");
 
+		double timeStampB = getTimeStamp();
+		printf("Layer %s time: %.6f\n",layer.name.c_str(),timeStampB-timeStampA);
+
         check_values(layer,h_output_activations);
         cudaFreeHost(h_output_activations);
 
     }
+
+	double ttimeStampB = getTimeStamp();
+	printf("Total time: %.6f\n",ttimeStampB-ttimeStampA);
 
     return 0;
 }

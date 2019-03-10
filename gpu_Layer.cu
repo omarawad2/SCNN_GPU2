@@ -226,6 +226,9 @@ void Layer::read_layer() {
         output_activations[i] = data_npy.data<float>()[i];
 
 	this->init = true;
+	
+	#ifdef VERBOSE
     printf("Layer %s loaded into memory\n",name.c_str());
+	#endif
 
 }

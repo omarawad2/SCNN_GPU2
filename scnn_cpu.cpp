@@ -4,8 +4,10 @@
 #include "cnpy.h"
 #include <cmath>
 #include <omp.h>
+#include <chrono>
 
 // Constants
+//#define VERBOSE
 
 /* Number of concurrent cores */
 const int N_THREADS = 1;
@@ -312,9 +314,10 @@ void read_layer(Layer &layer) {
     }
     for(uint32_t i = 0; i < max_index; i++)
         layer.output_activations[i] = data_npy.data<float>()[i];
-
+	
+	#ifdef VERBOSE
     printf("Layer %s loaded into memory\n",layer.name.c_str());
-
+	#endif
 }
 
 std::vector<Layer> read_bvlc_alexnet() {
@@ -340,14 +343,22 @@ static inline float ReLU(const float &value) {
 
 void check_values(const Layer &layer, const float* output_activations, float min_error = 0.01) {
 
+	#ifdef VERBOSE
     printf("Checking values for layer: %s of type %s\n",layer.name.c_str(),layer.type == "conv" ? "convolution" :
             "fully connected");
+	#endif
     uint32_t count = 0;
     for(uint32_t i = 0; i < layer.getMaxIndex("output_activations"); i++) {
+		#ifdef VERBOSE
         if(fabsf(output_activations[i] - layer.output_activations[i]) > min_error) count++;
+		#else
+		assert(fabsf(output_activations[i] - layer.output_activations[i]) <= min_error);
+		#endif
     }
+	#ifdef VERBOSE
     printf("ERRORS: %u out of %lu with absolute error tolerance of %.2f\n\n",count,
             layer.getMaxIndex("output_activations"), min_error);
+	#endif
 }
 
 // SCNN functions
@@ -501,8 +512,10 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 
 int main(int argc, char *argv[]) {
 
+	std::chrono::high_resolution_clock::time_point tt1 = std::chrono::high_resolution_clock::now();
+
     auto network = read_bvlc_alexnet();
-    //test
+
     int i = 0;
     for(auto layer : network) {
 
@@ -552,6 +565,8 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
 
+		std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
+
         // Add biases
         for (int n = 0; n < N; n++) {
             for (int k = 0; k < K; k++) {
@@ -582,10 +597,19 @@ int main(int argc, char *argv[]) {
                 output_activations[i] = ReLU(output_activations[i]);
         }
 
+        std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
+		printf("Layer %s time: %.6f\n",layer.name.c_str(),time_span.count());
+
         check_values(layer,output_activations);
         free(output_activations);
 
     }
+
+    std::chrono::high_resolution_clock::time_point tt2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(tt2 - tt1);
+
+	printf("Total time: %.6f\n",time_span.count());
 
     return 0;
 }
