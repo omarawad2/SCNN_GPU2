@@ -1,7 +1,7 @@
 # SCNN_GPU
 
 10/03/2019
-Summary: Added pinned memory for queues
+Summary: First naive implementantion without optimizations, pinned memory, etc.
 
 ### CPU code compilation:
 Command line compilation. First we need to configure the project:
