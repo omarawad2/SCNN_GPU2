@@ -1,5 +1,8 @@
 # SCNN_GPU
 
+10/03/2019
+Summary: First naive implementation adding pinned memory 
+
 ### CPU code compilation:
 Command line compilation. First we need to configure the project:
     
