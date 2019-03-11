@@ -8,6 +8,7 @@
 
 // Constants
 //#define VERBOSE
+#define FORCE_ONE_IMAGE
 
 /* Number of concurrent cores */
 const int N_THREADS = 1;
@@ -80,16 +81,29 @@ struct Layer {
         } else if(array == "bias") {
             return bias_shape[0];
         } else if(array == "activations") {
+            #ifdef FORCE_ONE_IMAGE
+            return 1*act_shape[1]*act_shape[2]*act_shape[3];
+            #else
             return act_shape[0]*act_shape[1]*act_shape[2]*act_shape[3];
+            #endif
         } else if(array == "output_activations") {
+            #ifdef FORCE_ONE_IMAGE
+            if(out_act_shape.size() == 4) return 1*out_act_shape[1]*out_act_shape[2]*out_act_shape[3];
+            else return 1*out_act_shape[1];
+            #else
             if(out_act_shape.size() == 4) return out_act_shape[0]*out_act_shape[1]*out_act_shape[2]*out_act_shape[3];
             else return out_act_shape[0]*out_act_shape[1];
+            #endif
         } else return 0;
     }
 
     void zero_pad() {
 
+        #ifdef FORCE_ONE_IMAGE
+        auto batch_size = (unsigned)1;
+        #else
         auto batch_size = act_shape[0];
+        #endif
         auto act_channels = act_shape[1];
         auto Nx = act_shape[2];
         auto Ny = act_shape[3];
@@ -114,7 +128,8 @@ struct Layer {
                         auto index_out = act_channels*new_Nx*new_Ny*n + new_Nx*new_Ny*k + new_Ny*(padding + i) +
                                 (padding + j);
                         auto index_in = act_channels*Nx*Ny*n + Nx*Ny*k + Ny*i + j;
-                        tmp_activations[index_out] = activations[index_in];
+                        auto tmp = activations[index_in];
+                        tmp_activations[index_out] = tmp;
                     }
                 }
             }
@@ -132,7 +147,11 @@ struct Layer {
 
     void grid_zero_pad(int X, int Y) {
 
+        #ifdef FORCE_ONE_IMAGE
+        auto batch_size = (unsigned)1;
+        #else
         auto batch_size = act_shape[0];
+        #endif
         auto act_channels = act_shape[1];
         auto Nx = act_shape[2];
         auto Ny = act_shape[3];
@@ -172,7 +191,11 @@ struct Layer {
 
     void act_split_4D(int K, int X, int Y) {
 
+        #ifdef FORCE_ONE_IMAGE
+        auto batch_size = (unsigned)1;
+        #else
         auto batch_size = act_shape[0];
+        #endif
         auto act_channels = act_shape[1];
         auto Nx = act_shape[2];
         auto Ny = act_shape[3];
@@ -252,7 +275,11 @@ struct Layer {
 
     void reshape_to_2D() {
 
+        #ifdef FORCE_ONE_IMAGE
+        auto batch_size = (unsigned)1;
+        #else
         auto batch_size = act_shape[0];
+        #endif
         auto act_channels = act_shape[1];
         auto Nx = act_shape[2];
         auto Ny = act_shape[3];
@@ -333,6 +360,19 @@ std::vector<Layer> read_bvlc_alexnet() {
     return network;
 }
 
+std::vector<Layer> read_vgg_cnn_s() {
+    std::vector<Layer> network;
+    network.emplace_back(Layer("vgg_cnn_s","conv1","conv",true,2,0));
+    network.emplace_back(Layer("vgg_cnn_s","conv2","conv",true,1,0));
+    network.emplace_back(Layer("vgg_cnn_s","conv3","conv",true,1,1));
+    network.emplace_back(Layer("vgg_cnn_s","conv4","conv",true,1,1));
+    network.emplace_back(Layer("vgg_cnn_s","conv5","conv",true,1,1));
+    network.emplace_back(Layer("vgg_cnn_s","fc6","fc",true,1,0));
+    network.emplace_back(Layer("vgg_cnn_s","fc7","fc",true,1,0));
+    network.emplace_back(Layer("vgg_cnn_s","fc8","fc",false,1,0));
+    return network;
+}
+
 // Auxiliary functions
 
 static inline float ReLU(const float &value) {
@@ -346,8 +386,8 @@ void check_values(const Layer &layer, const float* output_activations, float min
 	#ifdef VERBOSE
     printf("Checking values for layer: %s of type %s\n",layer.name.c_str(),layer.type == "conv" ? "convolution" :
             "fully connected");
-	#endif
     uint32_t count = 0;
+    #endif
     for(uint32_t i = 0; i < layer.getMaxIndex("output_activations"); i++) {
 		#ifdef VERBOSE
         if(fabsf(output_activations[i] - layer.output_activations[i]) > min_error) count++;
@@ -514,9 +554,9 @@ int main(int argc, char *argv[]) {
 
 	double total_time = 0.0;
 
-    auto network = read_bvlc_alexnet();
+    //auto network = read_bvlc_alexnet();
+    auto network = read_vgg_cnn_s();
 
-    int i = 0;
     for(auto layer : network) {
 
         read_layer(layer);
@@ -531,7 +571,11 @@ int main(int argc, char *argv[]) {
         }
 
         layer.zero_pad();
+        #ifdef FORCE_ONE_IMAGE
+        auto N = 1;
+        #else
         auto N = (int) layer.act_shape[0];
+        #endif
         auto C = (int) layer.act_shape[1];
         auto X = (int) layer.act_shape[2];
         auto Y = (int) layer.act_shape[3];

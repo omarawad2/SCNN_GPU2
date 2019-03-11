@@ -23,11 +23,24 @@ std::vector<Layer> read_bvlc_alexnet() {
     return network;
 }
 
+std::vector<Layer> read_vgg_cnn_s() {
+    std::vector<Layer> network;
+    network.emplace_back(Layer("vgg_cnn_s","conv1","conv",true,2,0));
+    network.emplace_back(Layer("vgg_cnn_s","conv2","conv",true,1,0));
+    network.emplace_back(Layer("vgg_cnn_s","conv3","conv",true,1,1));
+    network.emplace_back(Layer("vgg_cnn_s","conv4","conv",true,1,1));
+    network.emplace_back(Layer("vgg_cnn_s","conv5","conv",true,1,1));
+    network.emplace_back(Layer("vgg_cnn_s","fc6","fc",true,1,0));
+    network.emplace_back(Layer("vgg_cnn_s","fc7","fc",true,1,0));
+    network.emplace_back(Layer("vgg_cnn_s","fc8","fc",false,1,0));
+    return network;
+}
+
 //############################################### Auxiliary functions ##################################################
 double getTimeStamp() {
-struct timeval tv;
-gettimeofday( &tv, NULL );
-return (double) tv.tv_usec/1000000 + tv.tv_sec;
+    struct timeval tv;
+    gettimeofday( &tv, NULL );
+    return (double) tv.tv_usec/1000000 + tv.tv_sec;
 }
 
 inline
@@ -65,13 +78,13 @@ T* host2Dev(uint64_t size, const T *h_data, std::string task){
 // Checking function
 void check_values(const Layer &layer, const float *output_activations, float min_error = 0.01) {
 
-	#ifdef VERBOSE
+    #ifdef VERBOSE
     printf("Checking values for layer: %s of type %s\n",layer.name.c_str(),layer.type == "conv" ? "convolution" :
             "fully connected");
-	#endif
     uint32_t count = 0;
+    #endif
     for(uint32_t i = 0; i < layer.getMaxIndex("output_activations"); i++) {
-		#ifdef VERBOSE
+        #ifdef VERBOSE
         if(fabsf(output_activations[i] - layer.output_activations[i]) > min_error) count++;
 		#else
 		assert(fabsf(output_activations[i] - layer.output_activations[i]) <= min_error);
@@ -185,12 +198,12 @@ __global__ void kComputePE(int n, int W, int H, int K, int stride, int *act_queu
         int w = (x-r)/stride;
         int h = (y-s)/stride;
 
-         if(w >= 0 && w < W && h >= 0 && h < H) {
-                int pos = n * W * H * K + k * W * H + w * H + h;
-                //TODO: memory access not coalesced
-                //TODO: try to remove atomicAdd
-                atomicAdd(d_output_activations + pos, act * wgt);
-            }
+        if(w >= 0 && w < W && h >= 0 && h < H) {
+            int pos = n * W * H * K + k * W * H + w * H + h;
+            //TODO: memory access not coalesced
+            //TODO: try to remove atomicAdd
+            atomicAdd(d_output_activations + pos, act * wgt);
+        }
     }
 }
 
@@ -380,7 +393,8 @@ int main(int argc, char *argv[]) {
 
     double total_time = 0.0;
 
-    std::vector<Layer> network = read_bvlc_alexnet();
+    //std::vector<Layer> network = read_bvlc_alexnet();
+    std::vector<Layer> network = read_vgg_cnn_s();
 
     for(int i = 0; i < network.size(); i++) {
 
@@ -398,7 +412,11 @@ int main(int argc, char *argv[]) {
         }
 
         layer.zero_pad();
-        int N = 1; // Force one image, (int) layer.act_shape[0];
+        #ifdef FORCE_ONE_IMAGE
+        auto N = 1;
+        #else
+        auto N = (int) layer.act_shape[0];
+        #endif
         int C = (int) layer.act_shape[1];
         int X = (int) layer.act_shape[2];
         int Y = (int) layer.act_shape[3];
@@ -489,7 +507,6 @@ int main(int argc, char *argv[]) {
 
     }
 
-	double ttimeStampB = getTimeStamp();
 	printf("Total time: %.6f\n",total_time);
 
     return 0;

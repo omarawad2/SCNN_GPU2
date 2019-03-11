@@ -7,7 +7,8 @@
 #include <assert.h>
 #include <stdlib.h>
 
-#define VERBOSE
+//#define VERBOSE
+#define FORCE_ONE_IMAGE
 
 struct Layer {
 

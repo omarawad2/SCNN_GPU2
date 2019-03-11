@@ -27,22 +27,35 @@ float Layer::wgt_get(int i, int j, int k, int l) const {
     return weights[index];
 }
 
-uint64_t Layer::getMaxIndex(const std::string &array) const {
+uint64_t getMaxIndex(const std::string &array) const {
     if(array == "weights") {
         return wgt_shape[0]*wgt_shape[1]*wgt_shape[2]*wgt_shape[3];
     } else if(array == "bias") {
         return bias_shape[0];
     } else if(array == "activations") {
+        #ifdef FORCE_ONE_IMAGE
+        return 1*act_shape[1]*act_shape[2]*act_shape[3];
+        #else
         return act_shape[0]*act_shape[1]*act_shape[2]*act_shape[3];
+        #endif
     } else if(array == "output_activations") {
+        #ifdef FORCE_ONE_IMAGE
+        if(out_act_shape.size() == 4) return 1*out_act_shape[1]*out_act_shape[2]*out_act_shape[3];
+        else return 1*out_act_shape[1];
+        #else
         if(out_act_shape.size() == 4) return out_act_shape[0]*out_act_shape[1]*out_act_shape[2]*out_act_shape[3];
         else return out_act_shape[0]*out_act_shape[1];
+        #endif
     } else return 0;
 }
 
 void Layer::zero_pad() {
 
-    int batch_size = act_shape[0];
+    #ifdef FORCE_ONE_IMAGE
+    auto batch_size = (unsigned)1;
+    #else
+    auto batch_size = act_shape[0];
+    #endif
     int act_channels = act_shape[1];
     int Nx = act_shape[2];
     int Ny = act_shape[3];
@@ -86,7 +99,11 @@ void Layer::zero_pad() {
 
 void Layer::act_split_4D(int K, int X, int Y) {
 
-    int batch_size = act_shape[0];
+    #ifdef FORCE_ONE_IMAGE
+    auto batch_size = (unsigned)1;
+    #else
+    auto batch_size = act_shape[0];
+    #endif
     int act_channels = act_shape[1];
     int Nx = act_shape[2];
     int Ny = act_shape[3];
@@ -168,7 +185,11 @@ void Layer::wgt_split_4D(int K, int X, int Y) {
 
 void Layer::reshape_to_2D() {
 
-    int batch_size = act_shape[0];
+    #ifdef FORCE_ONE_IMAGE
+    auto batch_size = (unsigned)1;
+    #else
+    auto batch_size = act_shape[0];
+    #endif
     int act_channels = act_shape[1];
     int Nx = act_shape[2];
     int Ny = act_shape[3];
