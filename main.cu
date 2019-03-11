@@ -8,6 +8,14 @@
 
 #define GLOBAL_TIME
 
+struct host_data {
+	std::vector<float*> wgt_queue;
+	std::vector<int*> wgt_queue_k;
+    std::vector<int*> wgt_queue_r;
+    std::vector<int*> wgt_queue_s;
+    std::vector<int> wgt_queue_count;
+};
+
 //############################################### Read networks ########################################################
 
 std::vector<Layer> read_bvlc_alexnet() {
@@ -282,9 +290,7 @@ void computePE(int n, int W, int H, int K, int stride, int act_queue_size, int w
 }
 
 void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int W, int H, int R, int S,
-        const Layer &layer, const std::vector<float*> &h_wgt_queue, const std::vector<int*> &h_wgt_queue_k,
-        const std::vector<int*> &h_wgt_queue_r, const std::vector<int*> &h_wgt_queue_s, 
-		const std::vector<int> &h_wgt_queue_count, float *d_output_activations, float *d_act, float *d_act_queue, 
+        const Layer &layer, const host_data &hst, float *d_output_activations, float *d_act, float *d_act_queue, 
 		float *d_wgt_queue,	int *d_act_queue_x, int *d_act_queue_y, int *d_wgt_queue_k, 
 		int *d_wgt_queue_r, int *d_wgt_queue_s) {
 
@@ -296,13 +302,13 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 
 			// Transfer working weights to GPU
         	int pos = (ct+ck)*stride*stride + sx*stride + sy;
-        	check_error(cudaMemcpy(d_wgt_queue, h_wgt_queue[pos], Kc*R*S*sizeof(float), cudaMemcpyHostToDevice),
+        	check_error(cudaMemcpy(d_wgt_queue, hst.wgt_queue[pos], Kc*R*S*sizeof(float), cudaMemcpyHostToDevice),
            		"copy weights queue from host to device");
-        	check_error(cudaMemcpy(d_wgt_queue_k, h_wgt_queue_k[pos], Kc*R*S*sizeof(int), cudaMemcpyHostToDevice),
+        	check_error(cudaMemcpy(d_wgt_queue_k, hst.wgt_queue_k[pos], Kc*R*S*sizeof(int), cudaMemcpyHostToDevice),
            		"copy weights queue from host to device");
-			check_error(cudaMemcpy(d_wgt_queue_r, h_wgt_queue_r[pos], Kc*R*S*sizeof(int), cudaMemcpyHostToDevice),
+			check_error(cudaMemcpy(d_wgt_queue_r, hst.wgt_queue_r[pos], Kc*R*S*sizeof(int), cudaMemcpyHostToDevice),
            		"copy weights queue from host to device");
-        	check_error(cudaMemcpy(d_wgt_queue_s, h_wgt_queue_s[pos], Kc*R*S*sizeof(int), cudaMemcpyHostToDevice),
+        	check_error(cudaMemcpy(d_wgt_queue_s, hst.wgt_queue_s[pos], Kc*R*S*sizeof(int), cudaMemcpyHostToDevice),
            		"copy weights queue from host to device");	
 
             // Populate activations queue
@@ -317,7 +323,7 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
                 "copy activation queue count from device to host");
 
             //do actual convolution
-            computePE(n,W,H,K,stride,act_queue_count,h_wgt_queue_count[pos],d_act_queue,d_act_queue_x,d_act_queue_y,
+            computePE(n,W,H,K,stride,act_queue_count,hst.wgt_queue_count[pos],d_act_queue,d_act_queue_x,d_act_queue_y,
                     d_act_queue_count,d_wgt_queue,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,d_output_activations);
 
             //free GPU resources
@@ -377,11 +383,7 @@ int main(int argc, char *argv[]) {
         int kc = 0;
 
         // Allocate compressed weights off-line
-        std::vector<float*> h_wgt_queue;
-        std::vector<int*> h_wgt_queue_k;
-        std::vector<int*> h_wgt_queue_r;
-        std::vector<int*> h_wgt_queue_s;
-        std::vector<int> h_wgt_queue_count;
+		host_data hst;
 
         for(int ct = 0; ct < C; ct+=Ck) {
             for(int ck = 0; ck < Ck; ck++) {
@@ -435,11 +437,11 @@ int main(int argc, char *argv[]) {
 			                }
 			            }
 
-			            h_wgt_queue.push_back(wgt_queue_ch);
-			            h_wgt_queue_k.push_back(wgt_queue_k_ch);
-			            h_wgt_queue_r.push_back(wgt_queue_r_ch);
-			            h_wgt_queue_s.push_back(wgt_queue_s_ch);
-			            h_wgt_queue_count.push_back(wgt_queue_count_ch);
+			            hst.wgt_queue.push_back(wgt_queue_ch);
+			            hst.wgt_queue_k.push_back(wgt_queue_k_ch);
+			            hst.wgt_queue_r.push_back(wgt_queue_r_ch);
+			            hst.wgt_queue_s.push_back(wgt_queue_s_ch);
+			            hst.wgt_queue_count.push_back(wgt_queue_count_ch);
 
         			}
     			}
@@ -480,9 +482,8 @@ int main(int argc, char *argv[]) {
             kc = n;
             for(int ct = 0; ct < C; ct+=Ck) {
                 for(int ck = 0; ck < Ck; ck++) {
-                    computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,h_wgt_queue,h_wgt_queue_k,h_wgt_queue_r,h_wgt_queue_s,
-						h_wgt_queue_count,d_output_activations,d_act,d_act_queue,d_wgt_queue,d_act_queue_x,
-						d_act_queue_y,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s);
+                    computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,hst,d_output_activations,d_act,d_act_queue,
+						d_wgt_queue,d_act_queue_x,d_act_queue_y,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s);
                 }
                 kc += Kc;
             }
@@ -519,10 +520,10 @@ int main(int argc, char *argv[]) {
 
        				int pos = ck*stride*stride + sx*stride + sy;
 
-                    cudaFreeHost(h_wgt_queue[pos]);
-		            cudaFreeHost(h_wgt_queue_k[pos]);
-		            cudaFreeHost(h_wgt_queue_r[pos]);
-		            cudaFreeHost(h_wgt_queue_s[pos]);
+                    cudaFreeHost(hst.wgt_queue[pos]);
+		            cudaFreeHost(hst.wgt_queue_k[pos]);
+		            cudaFreeHost(hst.wgt_queue_r[pos]);
+		            cudaFreeHost(hst.wgt_queue_s[pos]);
         		}
         	}
         }
