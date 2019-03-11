@@ -1,5 +1,7 @@
 # SCNN_GPU
 
+11/03/2019 Summary: Populate weight queue offline
+
 ### CPU code compilation:
 Command line compilation. First we need to configure the project:
     
