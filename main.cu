@@ -285,7 +285,7 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
         const Layer &layer, const std::vector<float*> &h_wgt_queue, const std::vector<int*> &h_wgt_queue_k,
         const std::vector<int*> &h_wgt_queue_r, const std::vector<int*> &h_wgt_queue_s, 
 		const std::vector<int> &h_wgt_queue_count, float *d_output_activations, float *d_act, float *d_act_queue, 
-		float *d_wgt_queue,	int *d_act_queue_x, int *d_act_queue_y, float *d_wgt, int *d_wgt_queue_k, 
+		float *d_wgt_queue,	int *d_act_queue_x, int *d_act_queue_y, int *d_wgt_queue_k, 
 		int *d_wgt_queue_r, int *d_wgt_queue_s) {
 
     int stride = layer.stride;
@@ -394,22 +394,25 @@ int main(int argc, char *argv[]) {
     					int k_end = k_begin + Kc;
 
         			    int wgt_queue_count_ch = 0;
-        			    float *wgt_queue_ch = (float *) malloc(wgt_queue_max_size * sizeof(float));
+    					float *wgt_queue_ch;
+						int *wgt_queue_k_ch, *wgt_queue_r_ch, *wgt_queue_s_ch;
+
+    					cudaMallocHost((void **) &wgt_queue_ch, wgt_queue_max_size * sizeof(float));
 			            if (wgt_queue_ch == NULL) {
 			                fprintf(stderr, "Error: Failed to allocate weights queue!\n");
 			                exit(EXIT_FAILURE);
 			            }
-			            int *wgt_queue_k_ch = ((int *) malloc(wgt_queue_max_size * sizeof(int)));
+    					cudaMallocHost((void **) &wgt_queue_k_ch, wgt_queue_max_size * sizeof(int));
 			            if (wgt_queue_k_ch == NULL) {
 			                fprintf(stderr, "Error: Failed to allocate weights queue k!\n");
 			                exit(EXIT_FAILURE);
 			            }
-			            int *wgt_queue_r_ch = ((int *) malloc(wgt_queue_max_size * sizeof(int)));
+    					cudaMallocHost((void **) &wgt_queue_r_ch, wgt_queue_max_size * sizeof(int));
 			            if (wgt_queue_r_ch == NULL) {
 			                fprintf(stderr, "Error: Failed to allocate weights queue r!\n");
 			                exit(EXIT_FAILURE);
 			            }
-			            int *wgt_queue_s_ch = ((int *) malloc(wgt_queue_max_size * sizeof(int)));
+    					cudaMallocHost((void **) &wgt_queue_s_ch, wgt_queue_max_size * sizeof(int));
 			            if (wgt_queue_s_ch == NULL) {
 			                fprintf(stderr, "Error: Failed to allocate weights queue s!\n");
 			                exit(EXIT_FAILURE);
@@ -461,7 +464,6 @@ int main(int argc, char *argv[]) {
         int *d_wgt_queue_k, *d_wgt_queue_r, *d_wgt_queue_s;
 
     	float *d_act = host2Dev(layer.getMaxIndex("activations"), layer.activations,"copy device activations");
-    	float *d_wgt = host2Dev(layer.getMaxIndex("weights"), layer.weights,"copy device weights channel");
 
         //max. size is one activation channel
         check_error(cudaMalloc((void**) &d_act_queue, X*Y*sizeof(float)),"allocate device activations queue");
@@ -480,7 +482,7 @@ int main(int argc, char *argv[]) {
                 for(int ck = 0; ck < Ck; ck++) {
                     computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,h_wgt_queue,h_wgt_queue_k,h_wgt_queue_r,h_wgt_queue_s,
 						h_wgt_queue_count,d_output_activations,d_act,d_act_queue,d_wgt_queue,d_act_queue_x,
-						d_act_queue_y,d_wgt,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s);
+						d_act_queue_y,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s);
                 }
                 kc += Kc;
             }
@@ -488,7 +490,6 @@ int main(int argc, char *argv[]) {
 
         //free GPU resources
     	check_error(cudaFree(d_act),"free device activations");
-    	check_error(cudaFree(d_wgt),"free device weights");
         
 		check_error(cudaFree(d_act_queue),"free device activations queue");
         check_error(cudaFree(d_act_queue_x),"free device activations queue X dim");
@@ -518,10 +519,10 @@ int main(int argc, char *argv[]) {
 
        				int pos = ck*stride*stride + sx*stride + sy;
 
-                    free(h_wgt_queue[pos]);
-		            free(h_wgt_queue_k[pos]);
-		            free(h_wgt_queue_r[pos]);
-		            free(h_wgt_queue_s[pos]);
+                    cudaFreeHost(h_wgt_queue[pos]);
+		            cudaFreeHost(h_wgt_queue_k[pos]);
+		            cudaFreeHost(h_wgt_queue_r[pos]);
+		            cudaFreeHost(h_wgt_queue_s[pos]);
         		}
         	}
         }
