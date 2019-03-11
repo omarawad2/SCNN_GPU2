@@ -25,14 +25,14 @@ std::vector<Layer> read_bvlc_alexnet() {
 
 std::vector<Layer> read_vgg_cnn_s() {
     std::vector<Layer> network;
-    network.emplace_back(Layer("vgg_cnn_s","conv1","conv",true,2,0));
-    network.emplace_back(Layer("vgg_cnn_s","conv2","conv",true,1,0));
-    network.emplace_back(Layer("vgg_cnn_s","conv3","conv",true,1,1));
-    network.emplace_back(Layer("vgg_cnn_s","conv4","conv",true,1,1));
-    network.emplace_back(Layer("vgg_cnn_s","conv5","conv",true,1,1));
-    network.emplace_back(Layer("vgg_cnn_s","fc6","fc",true,1,0));
-    network.emplace_back(Layer("vgg_cnn_s","fc7","fc",true,1,0));
-    network.emplace_back(Layer("vgg_cnn_s","fc8","fc",false,1,0));
+    network.push_back(Layer("vgg_cnn_s","conv1","conv",true,2,0));
+    network.push_back(Layer("vgg_cnn_s","conv2","conv",true,1,0));
+    network.push_back(Layer("vgg_cnn_s","conv3","conv",true,1,1));
+    network.push_back(Layer("vgg_cnn_s","conv4","conv",true,1,1));
+    network.push_back(Layer("vgg_cnn_s","conv5","conv",true,1,1));
+    network.push_back(Layer("vgg_cnn_s","fc6","fc",true,1,0));
+    network.push_back(Layer("vgg_cnn_s","fc7","fc",true,1,0));
+    network.push_back(Layer("vgg_cnn_s","fc8","fc",false,1,0));
     return network;
 }
 
@@ -413,9 +413,9 @@ int main(int argc, char *argv[]) {
 
         layer.zero_pad();
         #ifdef FORCE_ONE_IMAGE
-        auto N = 1;
+        int N = 1;
         #else
-        auto N = (int) layer.act_shape[0];
+        int N = (int) layer.act_shape[0];
         #endif
         int C = (int) layer.act_shape[1];
         int X = (int) layer.act_shape[2];

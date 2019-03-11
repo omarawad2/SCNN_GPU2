@@ -27,7 +27,7 @@ float Layer::wgt_get(int i, int j, int k, int l) const {
     return weights[index];
 }
 
-uint64_t getMaxIndex(const std::string &array) const {
+uint64_t Layer::getMaxIndex(const std::string &array) const {
     if(array == "weights") {
         return wgt_shape[0]*wgt_shape[1]*wgt_shape[2]*wgt_shape[3];
     } else if(array == "bias") {
@@ -52,9 +52,9 @@ uint64_t getMaxIndex(const std::string &array) const {
 void Layer::zero_pad() {
 
     #ifdef FORCE_ONE_IMAGE
-    auto batch_size = (unsigned)1;
+    int batch_size = (unsigned)1;
     #else
-    auto batch_size = act_shape[0];
+    int batch_size = act_shape[0];
     #endif
     int act_channels = act_shape[1];
     int Nx = act_shape[2];
@@ -100,9 +100,9 @@ void Layer::zero_pad() {
 void Layer::act_split_4D(int K, int X, int Y) {
 
     #ifdef FORCE_ONE_IMAGE
-    auto batch_size = (unsigned)1;
+    int batch_size = (unsigned)1;
     #else
-    auto batch_size = act_shape[0];
+    int batch_size = act_shape[0];
     #endif
     int act_channels = act_shape[1];
     int Nx = act_shape[2];
@@ -186,9 +186,9 @@ void Layer::wgt_split_4D(int K, int X, int Y) {
 void Layer::reshape_to_2D() {
 
     #ifdef FORCE_ONE_IMAGE
-    auto batch_size = (unsigned)1;
+    int batch_size = (unsigned)1;
     #else
-    auto batch_size = act_shape[0];
+    int batch_size = act_shape[0];
     #endif
     int act_channels = act_shape[1];
     int Nx = act_shape[2];
