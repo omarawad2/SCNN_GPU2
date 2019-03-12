@@ -151,10 +151,10 @@ __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int 
     int x = threadIdx.y + blockIdx.y*blockDim.y;
 
     if(x < X){
-        int tmp_sx = x % stride;
+        int tmp_sx = x & (stride-1);
         if(y < Y){
             int pos = C*X*Y*n + X*Y*channel + x*Y + y;
-            int tmp_sy = y % stride;
+            int tmp_sy = y & (stride-1);
             float act_bits = dev.act[pos];
             if(act_bits !=0 && sx == tmp_sx && sy == tmp_sy){
                 int index = atomicAdd(act_queue_size,1);
@@ -166,8 +166,12 @@ __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int 
     }
 }
 
+static __device__ __forceinline__ unsigned int log2(unsigned int a){
+    return (a) ? (__float_as_int(__uint2float_rz(a)) >> 23) - 127 : 0;
+}
+
 //naive implmentation
-__global__ void kComputePE(int n, int W, int H, int K, int stride, int *act_queue_size, int wgt_queue_size, 
+__global__ void kComputePE(int n, int W, int H, int K, unsigned int stride, int *act_queue_size, int wgt_queue_size, 
 		float *d_wgt_queue, int *d_wgt_queue_k, int *d_wgt_queue_r, int *d_wgt_queue_s, int size_eff, device_data dev, float *d_output_activations) {
     //TODO: use shared mem.
     //TODO: try different configurations
@@ -197,9 +201,9 @@ __global__ void kComputePE(int n, int W, int H, int K, int stride, int *act_queu
         int r = d_wgt_queue_r[ff];//dev.wgt_queue_r[ff];
         int s = d_wgt_queue_s[ff];//dev.wgt_queue_s[ff];
 
-        //TODO: try to remove div. (takes a lot on GPU)
-        int w = (x-r)/stride;
-        int h = (y-s)/stride;
+        //works for power of 2 strides
+        int w = (x-r) >> log2(stride);
+        int h = (y-s) >> log2(stride);
 
         if(w >= 0 && w < W && h >= 0 && h < H) {
             int pos = n * W * H * K + k * W * H + w * H + h;
