@@ -154,8 +154,8 @@ __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int 
     if(x < X){
         int tmp_sx = x % stride;
         if(y < Y){
-            int tmp_sy = y % stride;
             int pos = C*X*Y*n + X*Y*channel + x*Y + y;
+            int tmp_sy = y % stride;
             float act_bits = dev.act[pos];
             if(act_bits !=0 && sx == tmp_sx && sy == tmp_sy){
                 int index = atomicAdd(act_queue_size,1);
@@ -282,7 +282,8 @@ void computePE(int n, int W, int H, int K, int stride, int act_queue_size, int w
     double timeStampA = getTimeStamp();
     #endif
 
-    dim3 block(32, 32);
+    //block size might be different for conv and fc
+    dim3 block(256, 4);
     dim3 grid((wgt_queue_size+block.x-1)/block.x,(act_queue_size+block.y-1)/block.y);
     check_grid(grid,"computePE");
 
@@ -308,13 +309,13 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 
 			// Transfer working weights to GPU
         	int pos = (ct+ck)*stride*stride + sx*stride + sy;
-        	check_error(cudaMemcpy(dev.wgt_queue, hst.wgt_queue[pos], Kc*R*S*sizeof(float), cudaMemcpyHostToDevice),
+        	check_error(cudaMemcpy(dev.wgt_queue, hst.wgt_queue[pos], hst.wgt_queue_size[pos]*sizeof(float), cudaMemcpyHostToDevice),
            		"copy weights queue from host to device");
-        	check_error(cudaMemcpy(dev.wgt_queue_k, hst.wgt_queue_k[pos], Kc*R*S*sizeof(int), cudaMemcpyHostToDevice),
+        	check_error(cudaMemcpy(dev.wgt_queue_k, hst.wgt_queue_k[pos], hst.wgt_queue_size[pos]*sizeof(int), cudaMemcpyHostToDevice),
            		"copy weights queue from host to device");
-			check_error(cudaMemcpy(dev.wgt_queue_r, hst.wgt_queue_r[pos], Kc*R*S*sizeof(int), cudaMemcpyHostToDevice),
+			check_error(cudaMemcpy(dev.wgt_queue_r, hst.wgt_queue_r[pos], hst.wgt_queue_size[pos]*sizeof(int), cudaMemcpyHostToDevice),
            		"copy weights queue from host to device");
-        	check_error(cudaMemcpy(dev.wgt_queue_s, hst.wgt_queue_s[pos], Kc*R*S*sizeof(int), cudaMemcpyHostToDevice),
+        	check_error(cudaMemcpy(dev.wgt_queue_s, hst.wgt_queue_s[pos], hst.wgt_queue_size[pos]*sizeof(int), cudaMemcpyHostToDevice),
            		"copy weights queue from host to device");	
 
             int *d_act_queue_size;
@@ -329,6 +330,11 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
             int act_queue_size;
             check_error(cudaMemcpy(&act_queue_size, d_act_queue_size, sizeof(int), cudaMemcpyDeviceToHost),
                 "copy activation queue size from device to host");
+
+            //int streamSize = 200;
+            //int nStreams = ()
+
+
 
             //do actual convolution
             computePE(n,W,H,K,stride,act_queue_size,hst.wgt_queue_size[pos],d_act_queue_size,dev,d_output_activations);
@@ -463,7 +469,6 @@ int main(int argc, char *argv[]) {
 
     	double timeStampA = getTimeStamp();
 
-        //tested
         addBias(N, K, W, H, layer, d_output_activations);
 
         ////////core compute/////////////
