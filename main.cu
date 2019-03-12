@@ -282,7 +282,7 @@ void computePE(int n, int W, int H, int K, int stride, int act_queue_size, int w
     double timeStampA = getTimeStamp();
     #endif
 
-    //block size might be different for conv and fc
+    //block size might be different for conv and fc (can be function of layer)
     dim3 block(256, 4);
     dim3 grid((wgt_queue_size+block.x-1)/block.x,(act_queue_size+block.y-1)/block.y);
     check_grid(grid,"computePE");
@@ -330,11 +330,6 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
             int act_queue_size;
             check_error(cudaMemcpy(&act_queue_size, d_act_queue_size, sizeof(int), cudaMemcpyDeviceToHost),
                 "copy activation queue size from device to host");
-
-            //int streamSize = 200;
-            //int nStreams = ()
-
-
 
             //do actual convolution
             computePE(n,W,H,K,stride,act_queue_size,hst.wgt_queue_size[pos],d_act_queue_size,dev,d_output_activations);
