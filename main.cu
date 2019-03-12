@@ -13,7 +13,7 @@ struct host_data {
 	std::vector<int*> wgt_queue_k;
     std::vector<int*> wgt_queue_r;
     std::vector<int*> wgt_queue_s;
-    std::vector<int> wgt_queue_count;
+    std::vector<int> wgt_queue_size;
 };
 
 //############################################### Read networks ########################################################
@@ -133,7 +133,7 @@ __global__ void kRelu(int N, int K, int W, int H, float *d_output_activations){
 
 //naive implementation
 __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int sy, int C, int X, int Y, int stride,
-        const float *d_act,float *d_act_queue, int *d_act_queue_x, int *d_act_queue_y, int *act_queue_count) {
+        const float *d_act,float *d_act_queue, int *d_act_queue_x, int *d_act_queue_y, int *act_queue_size) {
 
     int y = threadIdx.x + blockIdx.x*blockDim.x;
     int x = threadIdx.y + blockIdx.y*blockDim.y;
@@ -145,7 +145,7 @@ __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int 
             int pos = C*X*Y*n + X*Y*channel + x*Y + y;
             float act_bits = d_act[pos];
             if(act_bits !=0 && sx == tmp_sx && sy == tmp_sy){
-                int index = atomicAdd(act_queue_count,1);
+                int index = atomicAdd(act_queue_size,1);
                 d_act_queue[index] = act_bits;
                 d_act_queue_x[index] = x;
                 d_act_queue_y[index] = y;
@@ -238,13 +238,12 @@ void relu(int N, int K, int W, int H, const Layer &layer, float *d_output_activa
 }
 
 void populate_effectual_activations(int n, int channel, int sx, int sy, int stride, const Layer &layer, float *d_act,
-        float *d_act_queue, int *d_act_queue_x, int *d_act_queue_y, int *act_queue_count) {
+        float *d_act_queue, int *d_act_queue_x, int *d_act_queue_y, int *act_queue_size) {
 
     #ifndef GLOBAL_TIME
     double timeStampA = getTimeStamp();
     #endif
 
-    //int N = 1; // Force one image, (int) layer.act_shape[0];
     int C = (int) layer.act_shape[1];
     int X = (int) layer.act_shape[2];
     int Y = (int) layer.act_shape[3];
@@ -255,7 +254,7 @@ void populate_effectual_activations(int n, int channel, int sx, int sy, int stri
 
     //TODO:add streams
     kPopulate_effectual_activations<<<grid,block>>>(n,channel,sx,sy,C,X,Y,stride,d_act,d_act_queue,d_act_queue_x,
-            d_act_queue_y,act_queue_count);
+            d_act_queue_y,act_queue_size);
     cudaDeviceSynchronize();
 
     #ifndef GLOBAL_TIME
@@ -311,23 +310,26 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
         	check_error(cudaMemcpy(d_wgt_queue_s, hst.wgt_queue_s[pos], Kc*R*S*sizeof(int), cudaMemcpyHostToDevice),
            		"copy weights queue from host to device");	
 
-            // Populate activations queue
-            int act_queue_count = 0;
-            int *d_act_queue_count = host2Dev(1,&act_queue_count,"allocate activations queue count");
-            populate_effectual_activations(n,ct+ck,sx,sy,stride,layer,d_act,d_act_queue,d_act_queue_x,d_act_queue_y,
-                    d_act_queue_count);
+            int *d_act_queue_size;
+    		check_error(cudaMalloc((void**) &d_act_queue_size, sizeof(int)),"allocate activations queue size");
+    		check_error(cudaMemset(d_act_queue_size,0, sizeof(int)),"set activations queue size to zero");
 
-            //TODO optimize count usage (computePE needs to read it from mem, and we need to read it from host
+            // Populate activations queue
+            populate_effectual_activations(n,ct+ck,sx,sy,stride,layer,d_act,d_act_queue,d_act_queue_x,d_act_queue_y,
+                    d_act_queue_size);
+
+            //TODO optimize size usage (computePE needs to read it from mem, and we need to read it from host
             // in order to assign the block size
-            check_error(cudaMemcpy(&act_queue_count, d_act_queue_count, sizeof(int), cudaMemcpyDeviceToHost),
-                "copy activation queue count from device to host");
+            int act_queue_size;
+            check_error(cudaMemcpy(&act_queue_size, d_act_queue_size, sizeof(int), cudaMemcpyDeviceToHost),
+                "copy activation queue size from device to host");
 
             //do actual convolution
-            computePE(n,W,H,K,stride,act_queue_count,hst.wgt_queue_count[pos],d_act_queue,d_act_queue_x,d_act_queue_y,
-                    d_act_queue_count,d_wgt_queue,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,d_output_activations);
+            computePE(n,W,H,K,stride,act_queue_size,hst.wgt_queue_size[pos],d_act_queue,d_act_queue_x,d_act_queue_y,
+                    d_act_queue_size,d_wgt_queue,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,d_output_activations);
 
             //free GPU resources
-            check_error(cudaFree(d_act_queue_count),"free device activations counter");
+            check_error(cudaFree(d_act_queue_size),"free device activations size");
 
         }
     }
@@ -395,7 +397,7 @@ int main(int argc, char *argv[]) {
         				int k_begin = kc;
     					int k_end = k_begin + Kc;
 
-        			    int wgt_queue_count_ch = 0;
+        			    int wgt_queue_size_ch = 0;
     					float *wgt_queue_ch;
 						int *wgt_queue_k_ch, *wgt_queue_r_ch, *wgt_queue_s_ch;
 
@@ -427,11 +429,11 @@ int main(int argc, char *argv[]) {
 			                    for(int k = k_begin; k < k_end; k++) {
 			                        float wgt_bits = layer.wgt_get(k,ck,r,s);
 			                        if (wgt_bits != 0 && sx == tmp_sx && sy == tmp_sy) {
-			                            wgt_queue_ch[wgt_queue_count_ch] = wgt_bits;
-			                            wgt_queue_k_ch[wgt_queue_count_ch] = k;
-			                            wgt_queue_r_ch[wgt_queue_count_ch] = r;
-			                            wgt_queue_s_ch[wgt_queue_count_ch] = s;
-			                            wgt_queue_count_ch++;
+			                            wgt_queue_ch[wgt_queue_size_ch] = wgt_bits;
+			                            wgt_queue_k_ch[wgt_queue_size_ch] = k;
+			                            wgt_queue_r_ch[wgt_queue_size_ch] = r;
+			                            wgt_queue_s_ch[wgt_queue_size_ch] = s;
+			                            wgt_queue_size_ch++;
 			                        }
 			                    }
 			                }
@@ -441,7 +443,7 @@ int main(int argc, char *argv[]) {
 			            hst.wgt_queue_k.push_back(wgt_queue_k_ch);
 			            hst.wgt_queue_r.push_back(wgt_queue_r_ch);
 			            hst.wgt_queue_s.push_back(wgt_queue_s_ch);
-			            hst.wgt_queue_count.push_back(wgt_queue_count_ch);
+			            hst.wgt_queue_size.push_back(wgt_queue_size_ch);
 
         			}
     			}
