@@ -7,12 +7,6 @@
 #include <stdlib.h>
 
 #define GLOBAL_TIME
-//#define VERBOSE
-
-const int c_size = 4000;
-__device__ __constant__ float c_act_queue[c_size];
-__device__ __constant__ int c_act_queue_x[c_size];
-__device__ __constant__ int c_act_queue_y[c_size];
 
 struct host_data {
 	std::vector<float*> wgt_queue;
@@ -171,9 +165,9 @@ __global__ void kComputePE(int n, int W, int H, int K, int stride, int *act_queu
     int ii = threadIdx.y + blockIdx.y*blockDim.y;
 
     if(ii < *act_queue_size && ff < wgt_queue_size){
-        float act = c_act_queue[ii];
-        int x = c_act_queue_x[ii];
-        int y = c_act_queue_y[ii];
+        float act = d_act_queue[ii];
+        int x = d_act_queue_x[ii];
+        int y = d_act_queue_y[ii];
 
         float wgt = d_wgt_queue[ff];
         int k = d_wgt_queue_k[ff];
@@ -328,10 +322,6 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
             check_error(cudaMemcpy(&act_queue_count, d_act_queue_count, sizeof(int), cudaMemcpyDeviceToHost),
                 "copy activation queue count from device to host");
 
-            check_error(cudaMemcpyToSymbol(c_act_queue,d_act_queue,act_queue_count*sizeof(float),0,cudaMemcpyDeviceToDevice),"copy act_queue to const mem");
-            check_error(cudaMemcpyToSymbol(c_act_queue_x,d_act_queue_x,act_queue_count*sizeof(int),0,cudaMemcpyDeviceToDevice),"copy act_queue_x to const mem");
-            check_error(cudaMemcpyToSymbol(c_act_queue_y,d_act_queue_y,act_queue_count*sizeof(int),0,cudaMemcpyDeviceToDevice),"copy act_queue_y to const mem");
-
             //do actual convolution
             computePE(n,W,H,K,stride,act_queue_count,hst.wgt_queue_count[pos],d_act_queue,d_act_queue_x,d_act_queue_y,
                     d_act_queue_count,d_wgt_queue,d_wgt_queue_k,d_wgt_queue_r,d_wgt_queue_s,d_output_activations);
@@ -464,11 +454,9 @@ int main(int argc, char *argv[]) {
         float *d_output_activations;
         check_error(cudaMalloc((void **) &d_output_activations, bytes),"allocate device output activations");
 
-        float *h_output_activations;
-        check_error(cudaMallocHost((void **) &h_output_activations, bytes),"allocate output activations");
-
     	double timeStampA = getTimeStamp();
 
+        //tested
         addBias(N, K, W, H, layer, d_output_activations);
 
         ////////core compute/////////////
@@ -515,6 +503,9 @@ int main(int argc, char *argv[]) {
         ///////////////////////////
 
         relu(N, K, W, H, layer, d_output_activations);
+
+        float *h_output_activations;
+        check_error(cudaMallocHost((void **) &h_output_activations, bytes),"allocate output activations");
 
         check_error(cudaMemcpy(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost),
                 "copy output activations from device to host");
