@@ -209,6 +209,7 @@ __global__ void kComputePE(int n, int W, int H, int K, unsigned int stride, int 
             int pos = n * W * H * K + k * W * H + w * H + h;
             //TODO: memory access not coalesced
             //TODO: try to remove atomicAdd
+            //d_output_activations[pos] += act * wgt;
             atomicAdd(d_output_activations + pos, act * wgt);
         }
     }
@@ -378,7 +379,7 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
                 computePE(n,W,H,K,stride,act_queue_size,hst.wgt_queue_size[pos],d_act_queue_size,dev,size_eff,offset,d_output_activations,streams[i+1]);
             }
 
-            cudaDeviceSynchronize();
+            //cudaDeviceSynchronize();
 
             //do actual convolution
             //computePE(n,W,H,K,stride,act_queue_size,hst.wgt_queue_size[pos],d_act_queue_size,dev,d_output_activations);
@@ -511,6 +512,9 @@ int main(int argc, char *argv[]) {
         float *d_output_activations;
         check_error(cudaMalloc((void **) &d_output_activations, bytes),"allocate device output activations");
 
+        float *h_output_activations;
+        check_error(cudaMallocHost((void **) &h_output_activations, bytes),"allocate output activations");
+
     	double timeStampA = getTimeStamp();
 
         addBias(N, K, W, H, layer, d_output_activations);
@@ -555,23 +559,7 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        //free GPU resources
-    	check_error(cudaFree(d_act),"free device activations");
-        
-		check_error(cudaFree(d_act_queue),"free device activations queue");
-        check_error(cudaFree(d_act_queue_x),"free device activations queue X dim");
-        check_error(cudaFree(d_act_queue_y),"free device activations queue Y dim");
-        
-		check_error(cudaFree(d_wgt_queue),"free device weights queue");
-        check_error(cudaFree(d_wgt_queue_k),"free device weights queue K dim");
-        check_error(cudaFree(d_wgt_queue_r),"free device weights queue R dim");
-        check_error(cudaFree(d_wgt_queue_s),"free device weights queue S dim");
-        ///////////////////////////
-
         relu(N, K, W, H, layer, d_output_activations);
-
-        float *h_output_activations;
-        check_error(cudaMallocHost((void **) &h_output_activations, bytes),"allocate output activations");
 
         check_error(cudaMemcpy(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost),
                 "copy output activations from device to host");
@@ -579,6 +567,19 @@ int main(int argc, char *argv[]) {
 		double timeStampB = getTimeStamp();
 		printf("Layer %s time: %.6f\n",layer.name.c_str(),timeStampB-timeStampA);
 		total_time += timeStampB-timeStampA;
+
+        //free GPU resources
+        check_error(cudaFree(d_act),"free device activations");
+        
+        check_error(cudaFree(d_act_queue),"free device activations queue");
+        check_error(cudaFree(d_act_queue_x),"free device activations queue X dim");
+        check_error(cudaFree(d_act_queue_y),"free device activations queue Y dim");
+        
+        check_error(cudaFree(d_wgt_queue),"free device weights queue");
+        check_error(cudaFree(d_wgt_queue_k),"free device weights queue K dim");
+        check_error(cudaFree(d_wgt_queue_r),"free device weights queue R dim");
+        check_error(cudaFree(d_wgt_queue_s),"free device weights queue S dim");
+        ///////////////////////////
 
 		for(int ck = 0; ck < C; ck++) {
            	for(int sx = 0; sx < stride; sx++) {
