@@ -5,9 +5,10 @@
 #include <cmath>
 #include <omp.h>
 #include <chrono>
+#include <algorithm>
 
 // Constants
-//#define VERBOSE
+#define VERBOSE
 #define FORCE_ONE_IMAGE
 
 /* Number of concurrent cores */
@@ -34,6 +35,12 @@ struct Layer {
 
     int padding = 0;
 
+    bool Pool = false;
+
+    int p_kernel = 1;
+
+    int p_stride = 1;
+
     /* numpy array containing the weights for the layer */
     float* weights = nullptr;
     std::vector<size_t> wgt_shape;
@@ -51,7 +58,8 @@ struct Layer {
     std::vector<size_t> out_act_shape;
 
     Layer(const std::string &_network, const std::string &_name, const std::string &_type, bool _ReLU, int _stride,
-            int _padding) : ReLU(_ReLU), stride(_stride), padding(_padding) {
+            int _padding, bool _Pool, int _p_kernel, int _p_stride) : ReLU(_ReLU), stride(_stride), padding(_padding),
+            Pool(_Pool), p_stride(_p_stride), p_kernel(_p_kernel) {
         this->network = _network;
         this->name = _name;
         this->type = _type;
@@ -297,7 +305,7 @@ struct Layer {
 
 // Read network from numpy arrays
 
-void read_layer(Layer &layer) {
+void read_layer(Layer &layer, bool first_layer) {
 
     cnpy::NpyArray data_npy;
     uint64_t max_index;
@@ -322,16 +330,17 @@ void read_layer(Layer &layer) {
     for(uint32_t i = 0; i < max_index; i++)
         layer.bias[i] = data_npy.data<float>()[i];
 
-    cnpy::npy_load("net_traces/" + layer.network + "/act-" + layer.name + "-0.npy" , data_npy, layer.act_shape);
-    max_index = layer.getMaxIndex("activations");
-    layer.activations = (float *) malloc(max_index * sizeof(float));
-    if (layer.activations == nullptr) {
-        fprintf(stderr, "Error: Failed to allocate activations!\n");
-        exit(EXIT_FAILURE);
+    if(first_layer) {
+        cnpy::npy_load("net_traces/" + layer.network + "/act-" + layer.name + "-0.npy", data_npy, layer.act_shape);
+        max_index = layer.getMaxIndex("activations");
+        layer.activations = (float *) malloc(max_index * sizeof(float));
+        if (layer.activations == nullptr) {
+            fprintf(stderr, "Error: Failed to allocate activations!\n");
+            exit(EXIT_FAILURE);
+        }
+        for (uint32_t i = 0; i < max_index; i++)
+            layer.activations[i] = data_npy.data<float>()[i];
     }
-    for(uint32_t i = 0; i < max_index; i++)
-        layer.activations[i] = data_npy.data<float>()[i];
-
     cnpy::npy_load("net_traces/" + layer.network + "/act-" + layer.name + "-0-out.npy" , data_npy, layer.out_act_shape);
     max_index = layer.getMaxIndex("output_activations");
     layer.output_activations = (float *) malloc(max_index * sizeof(float));
@@ -349,18 +358,18 @@ void read_layer(Layer &layer) {
 
 std::vector<Layer> read_bvlc_alexnet() {
     std::vector<Layer> network;
-    network.emplace_back(Layer("bvlc_alexnet","conv1","conv",true,4,0));
-    network.emplace_back(Layer("bvlc_alexnet","conv2","conv",true,1,2));
-    network.emplace_back(Layer("bvlc_alexnet","conv3","conv",true,1,1));
-    network.emplace_back(Layer("bvlc_alexnet","conv4","conv",true,1,1));
-    network.emplace_back(Layer("bvlc_alexnet","conv5","conv",true,1,1));
-    network.emplace_back(Layer("bvlc_alexnet","fc6","fc",true,1,0));
-    network.emplace_back(Layer("bvlc_alexnet","fc7","fc",true,1,0));
-    network.emplace_back(Layer("bvlc_alexnet","fc8","fc",false,1,0));
+    network.emplace_back(Layer("bvlc_alexnet","conv1","conv",true,4,0,true,3,2));
+    network.emplace_back(Layer("bvlc_alexnet","conv2","conv",true,1,2,true,3,2));
+    network.emplace_back(Layer("bvlc_alexnet","conv3","conv",true,1,1,false,1,1));
+    network.emplace_back(Layer("bvlc_alexnet","conv4","conv",true,1,1,false,1,1));
+    network.emplace_back(Layer("bvlc_alexnet","conv5","conv",true,1,1,true,3,2));
+    //network.emplace_back(Layer("bvlc_alexnet","fc6","fc",true,1,0,false,1,1));
+    //network.emplace_back(Layer("bvlc_alexnet","fc7","fc",true,1,0,false,1,1));
+    //network.emplace_back(Layer("bvlc_alexnet","fc8","fc",false,1,0,false,1,1));
     return network;
 }
 
-std::vector<Layer> read_vgg_cnn_s() {
+/*std::vector<Layer> read_vgg_cnn_s() {
     std::vector<Layer> network;
     network.emplace_back(Layer("vgg_cnn_s","conv1","conv",true,2,0));
     network.emplace_back(Layer("vgg_cnn_s","conv2","conv",true,1,0));
@@ -371,7 +380,7 @@ std::vector<Layer> read_vgg_cnn_s() {
     network.emplace_back(Layer("vgg_cnn_s","fc7","fc",true,1,0));
     network.emplace_back(Layer("vgg_cnn_s","fc8","fc",false,1,0));
     return network;
-}
+}*/
 
 // Auxiliary functions
 
@@ -510,9 +519,18 @@ int main(int argc, char *argv[]) {
     auto network = read_bvlc_alexnet();
     //auto network = read_vgg_cnn_s();
 
+    bool first_layer = true;
+    float *prev_layer_activations;
+    std::vector<size_t> prev_layer_act_shape;
+
+
     for(auto layer : network) {
 
-        read_layer(layer);
+        read_layer(layer, first_layer);
+        if(!first_layer) {
+            layer.activations = prev_layer_activations;
+            layer.act_shape = prev_layer_act_shape;
+        }
 
         if(layer.type == "fc") {
             layer.reshape_to_2D();
@@ -658,6 +676,55 @@ int main(int argc, char *argv[]) {
                 output_activations[i] = ReLU(output_activations[i]);
         }
 
+        // Missing LRN normalization
+
+        if(layer.Pool) {
+
+            int Kp = layer.p_kernel;
+            int p_stride = layer.p_stride;
+            int Wp = (W - Kp)/p_stride + 1;
+            int Hp = (W - Kp)/p_stride + 1;
+
+            prev_layer_activations = (float *) malloc(N * K * Wp * Hp * sizeof(float));
+            if (prev_layer_activations == nullptr) {
+                fprintf(stderr, "Error: Failed to allocate pooling output activations!\n");
+                exit(EXIT_FAILURE);
+            }
+
+            for (int n = 0; n < N; n++) {
+                for (int k = 0; k < K; k++) {
+                    for (int x = 0; x < Wp; x++) {
+                        for (int y = 0; y < Hp; y++) {
+                            std::vector<float> max;
+                            for (int i = 0; i < Kp; i++) {
+                                for (int j = 0; j < Kp; j++) {
+                                    int pos = n*K*W*H + k*W*H + (p_stride * x + i)*H + (p_stride * y + j);
+                                    max.push_back(output_activations[pos]);
+                                }
+                            }
+                            int pos = n*K*Wp*Hp + k*Wp*Hp + x*Hp + y;
+                            prev_layer_activations[pos] = *std::max_element(max.begin(), max.end());
+                        }
+                    }
+                }
+            }
+
+            prev_layer_act_shape.clear();
+            prev_layer_act_shape.push_back((unsigned)N);
+            prev_layer_act_shape.push_back((unsigned)K);
+            prev_layer_act_shape.push_back((unsigned)Wp);
+            prev_layer_act_shape.push_back((unsigned)Hp);
+
+        } else {
+            prev_layer_activations = output_activations;
+
+            prev_layer_act_shape.clear();
+            prev_layer_act_shape.push_back((unsigned)N);
+            prev_layer_act_shape.push_back((unsigned)K);
+            prev_layer_act_shape.push_back((unsigned)W);
+            prev_layer_act_shape.push_back((unsigned)H);
+        }
+
         std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1);
 		printf("Layer %s time: %.6f\n",layer.name.c_str(),time_span.count());
@@ -678,9 +745,14 @@ int main(int argc, char *argv[]) {
         }
 
         check_values(layer,output_activations);
-        free(output_activations);
+		if(layer.Pool)
+            free(output_activations);
+
+        first_layer = false;
 
     }
+
+    free(prev_layer_activations);
 
 	printf("Total time: %.6f\n",total_time);
 
