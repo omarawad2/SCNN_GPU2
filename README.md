@@ -1,5 +1,7 @@
 # SCNN_GPU
 
+13/03/2019 Summary: Add streams for copying weights and compute PE
+
 ### CPU code compilation:
 Command line compilation. First we need to configure the project:
     
