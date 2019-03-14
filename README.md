@@ -1,5 +1,7 @@
 # SCNN_GPU
 
+14/03/2019 Summary: Each PE executes a various weights instead of just one
+
 ### CPU code compilation:
 Command line compilation. First we need to configure the project:
     
