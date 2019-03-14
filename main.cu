@@ -7,6 +7,8 @@
 #include <stdlib.h>
 
 #define GLOBAL_TIME
+#define WEIGHTS_BATCH 8
+#define LOG2_WEIGHTS_BATCH 3
 
 struct host_data {
 	std::vector<float*> wgt_queue;
@@ -170,12 +172,12 @@ static __device__ __forceinline__ unsigned int log2(unsigned int a){
 }
 
 //naive implmentation
-__global__ void kComputePE(int n, int W, int H, int K, unsigned int stride, int *act_queue_size, int wgt_queue_size, 
-		int offset, int size_eff, device_data dev, float *d_output_activations) {
+__global__ void kComputePE(int n_offset, int k_offset, int W, int H, unsigned int stride, int *act_queue_size, 
+		int wgt_queue_size,	int offset, int size_eff, device_data dev, float *d_output_activations) {
     //TODO: use shared mem.
     //TODO: try different configurations
 
-    int ff = threadIdx.x + blockIdx.x*blockDim.x;
+    int ff = (threadIdx.x + blockIdx.x*blockDim.x) << LOG2_WEIGHTS_BATCH;
     int ii = threadIdx.y + blockIdx.y*blockDim.y;
 
     if(ii < *act_queue_size && ff < size_eff){
@@ -183,21 +185,25 @@ __global__ void kComputePE(int n, int W, int H, int K, unsigned int stride, int 
         int x = dev.act_queue_x[ii];
         int y = dev.act_queue_y[ii];
 
-        float wgt = (dev.wgt_queue + offset)[ff];
-        int k = (dev.wgt_queue_k + offset)[ff];
-        int r = (dev.wgt_queue_r + offset)[ff];
-        int s = (dev.wgt_queue_s + offset)[ff];
+		for(int b = 0; b < WEIGHTS_BATCH; b++) {
 
-        //works for power of 2 strides
-        int w = (x-r) >> log2(stride);
-        int h = (y-s) >> log2(stride);
+		    float wgt = (dev.wgt_queue + offset)[ff+b];
+		    int k = (dev.wgt_queue_k + offset)[ff+b];
+		    int r = (dev.wgt_queue_r + offset)[ff+b];
+		    int s = (dev.wgt_queue_s + offset)[ff+b];
 
-        if(w >= 0 && w < W && h >= 0 && h < H) {
-            int pos = n * W * H * K + k * W * H + w * H + h;
-            //TODO: memory access not coalesced
-            //TODO: try to remove atomicAdd
-            atomicAdd(d_output_activations + pos, act * wgt);
-        }
+		    //works for power of 2 strides
+		    int w = (x-r) >> log2(stride);
+		    int h = (y-s) >> log2(stride);
+
+		    if(w >= 0 && w < W && h >= 0 && h < H) {
+		        int pos = n_offset + k * k_offset + w * H + h;
+		        //TODO: memory access not coalesced
+		        //TODO: try to remove atomicAdd
+		        atomicAdd(d_output_activations + pos, act * wgt);
+		    }
+
+		}
     }
 }
 
@@ -293,11 +299,14 @@ void computePE(int n, int W, int H, int K, int stride, int act_queue_size, int w
 
     //block size might be different for conv and fc
     dim3 block(128, 8);
-    dim3 grid((size_eff+block.x-1)/block.x,(act_queue_size+block.y-1)/block.y);
+    dim3 grid(((size_eff/WEIGHTS_BATCH)+block.x-1)/block.x,(act_queue_size+block.y-1)/block.y);
     check_grid(grid,"computePE");
 
-    kComputePE<<<grid,block,0,stream>>>(n,W,H,K,stride,d_act_queue_size,wgt_queue_size,offset,size_eff,dev,
-		d_output_activations);
+	int n_offset = n*K*W*H;
+	int k_offset = W*H;
+
+    kComputePE<<<grid,block,0,stream>>>(n_offset,k_offset,W,H,stride,d_act_queue_size,wgt_queue_size,offset,size_eff,
+		dev,d_output_activations);
     //cudaDeviceSynchronize();
 
     #ifndef GLOBAL_TIME
