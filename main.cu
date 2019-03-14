@@ -7,8 +7,6 @@
 #include <stdlib.h>
 
 #define GLOBAL_TIME
-#define WEIGHTS_BATCH 8
-#define LOG2_WEIGHTS_BATCH 3
 
 struct host_data {
 	std::vector<float*> wgt_queue;
@@ -172,12 +170,13 @@ static __device__ __forceinline__ unsigned int log2(unsigned int a){
 }
 
 //naive implmentation
-__global__ void kComputePE(int n_offset, int k_offset, int W, int H, unsigned int stride, int *act_queue_size, 
-		int wgt_queue_size,	int offset, int size_eff, device_data dev, float *d_output_activations) {
+__global__ void kComputePE(unsigned int batches, int n_offset, int k_offset, int W, int H, unsigned int stride, 
+		int *act_queue_size, int wgt_queue_size, int offset, int size_eff, device_data dev, 
+		float *d_output_activations) {
     //TODO: use shared mem.
     //TODO: try different configurations
 
-    int ff = (threadIdx.x + blockIdx.x*blockDim.x) << LOG2_WEIGHTS_BATCH;
+    int ff = (threadIdx.x + blockIdx.x*blockDim.x) << log2(batches);
     int ii = threadIdx.y + blockIdx.y*blockDim.y;
 
     if(ii < *act_queue_size && ff < size_eff){
@@ -185,7 +184,7 @@ __global__ void kComputePE(int n_offset, int k_offset, int W, int H, unsigned in
         int x = dev.act_queue_x[ii];
         int y = dev.act_queue_y[ii];
 
-		for(int b = 0; b < WEIGHTS_BATCH; b++) {
+		for(int b = 0; b < batches; b++) {
 
 		    float wgt = (dev.wgt_queue + offset)[ff+b];
 		    int k = (dev.wgt_queue_k + offset)[ff+b];
@@ -290,23 +289,28 @@ void populate_effectual_activations(int n, int channel, int sx, int sy, int stri
     #endif
 }
 
-void computePE(int n, int W, int H, int K, int stride, int act_queue_size, int wgt_queue_size, int *d_act_queue_size, 
+void computePE(int n, int W, int H, const Layer &layer, int act_queue_size, int wgt_queue_size, int *d_act_queue_size, 
 		device_data dev, int size_eff, int offset, float *d_output_activations, cudaStream_t stream) {
 
     #ifndef GLOBAL_TIME
     double timeStampA = getTimeStamp();
     #endif
 
-    //block size might be different for conv and fc
-    dim3 block(128, 8);
-    dim3 grid(((size_eff/WEIGHTS_BATCH)+block.x-1)/block.x,(act_queue_size+block.y-1)/block.y);
-    check_grid(grid,"computePE");
+	int K = (int) layer.wgt_shape[0];
+	int stride = layer.stride;
 
 	int n_offset = n*K*W*H;
 	int k_offset = W*H;
+	//TODO can be improved
+	unsigned int batches = (layer.type == "fc") ? 8 : 2;
 
-    kComputePE<<<grid,block,0,stream>>>(n_offset,k_offset,W,H,stride,d_act_queue_size,wgt_queue_size,offset,size_eff,
-		dev,d_output_activations);
+    //block size might be different for conv and fc
+    dim3 block(128, 8);
+    dim3 grid(((size_eff/batches)+block.x-1)/block.x,(act_queue_size+block.y-1)/block.y);
+    check_grid(grid,"computePE");
+
+    kComputePE<<<grid,block,0,stream>>>(batches,n_offset,k_offset,W,H,stride,d_act_queue_size,wgt_queue_size,offset,
+			size_eff,dev,d_output_activations);
     //cudaDeviceSynchronize();
 
     #ifndef GLOBAL_TIME
@@ -362,7 +366,7 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 					cudaMemcpyHostToDevice, streams[i+1]), "copy weights queue s from host to device");
                 
 				//do actual convolution
-                computePE(n,W,H,K,stride,act_queue_size,hst.wgt_queue_size[pos],d_act_queue_size,dev,size_eff,offset,
+                computePE(n,W,H,layer,act_queue_size,hst.wgt_queue_size[pos],d_act_queue_size,dev,size_eff,offset,
 					d_output_activations,streams[i+1]);
             }
 
