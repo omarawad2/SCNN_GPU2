@@ -146,8 +146,19 @@ __global__ void kRelu(int N, int K, int W, int H, float *d_output_activations){
 __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int sy, int C, int X, int Y, int stride,
         device_data dev, int *act_queue_size) {
 
+    __shared__ int nnz_act_count;
+    __shared__ float s_act_queue[1024];
+    __shared__ float s_act_queue_x[1024];
+    __shared__ float s_act_queue_y[1024];
+
     int y = threadIdx.x + blockIdx.x*blockDim.x;
     int x = threadIdx.y + blockIdx.y*blockDim.y;
+
+if (threadIdx.x == 0 && threadIdx.y == 0){
+    nnz_act_count = 0;// *act_queue_size = 0;
+  //  printf("%d %d \n",*act_queue_size,nnz_act_count);
+}
+    __syncthreads();
 
     if(x < X){
         int tmp_sx = x & (stride-1);
@@ -156,13 +167,35 @@ __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int 
             int tmp_sy = y & (stride-1);
             float act_bits = dev.act[pos];
             if(act_bits !=0 && sx == tmp_sx && sy == tmp_sy){
-                int index = atomicAdd(act_queue_size,1);
-                dev.act_queue[index] = act_bits;
-                dev.act_queue_x[index] = x;
-                dev.act_queue_y[index] = y;
+                int index = atomicAdd(&nnz_act_count,1);
+                //int index = atomicAdd(act_queue_size,1);
+                s_act_queue[index] = act_bits;
+                s_act_queue_x[index] = x;
+                s_act_queue_y[index] = y;
+
+               //dev.act_queue[index] = act_bits;
+                //dev.act_queue_x[index] = x;
+                //dev.act_queue_y[index] = y;
             }
         }
     }
+    __syncthreads();
+
+    int offset = 0;
+    if (threadIdx.x == 0 && threadIdx.y == 0){
+                offset = atomicAdd(act_queue_size,nnz_act_count);
+                //printf("%d %d \n", offset, nnz_act_count);
+            }
+
+    __syncthreads();
+
+    int index = y + blockDim.x*x;
+    if(index < nnz_act_count){
+        dev.act_queue[offset+index] = s_act_queue[index];
+        dev.act_queue_x[offset+index] = s_act_queue_x[index];
+        dev.act_queue_y[offset+index] = s_act_queue_y[index];
+    }
+
 }
 
 static __device__ __forceinline__ unsigned int log2(unsigned int a){
@@ -277,6 +310,7 @@ void populate_effectual_activations(int n, int channel, int sx, int sy, int stri
     dim3 block(32, 32);
     dim3 grid((Y+block.x-1)/block.x,(X+block.y-1)/block.y);
     check_grid(grid,"populate_effectual_activations");
+    //printf("grid: %d %d\n",grid.x,grid.y);
 
     //TODO:add streams
     kPopulate_effectual_activations<<<grid,block>>>(n,channel,sx,sy,C,X,Y,stride,dev,act_queue_size);
@@ -337,15 +371,20 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
     		check_error(cudaMemset(d_act_queue_size,0, sizeof(int)),"set activations queue size to zero");
 
             // Populate activations queue
+            //if(sx == 0 && sy == 0 && n == 0 && ct+ck == 0)
             populate_effectual_activations(n,ct+ck,sx,sy,stride,layer,dev,d_act_queue_size);
 
             //TODO optimize size usage (computePE needs to read it from mem, and we need to read it from host
             // in order to assign the block size
             int act_queue_size;
+            //TODO: add streams
+            //cudaStream_t stream1;
+            //cudaStreamCreate(&stream1);
             check_error(cudaMemcpy(&act_queue_size, d_act_queue_size, sizeof(int), cudaMemcpyDeviceToHost),
                 "copy activation queue size from device to host");
-            
-            int streamSize = 20000;
+            //printf("act queue size: %d \n",act_queue_size);
+
+            int streamSize = 30000;
             int nStreams = (hst.wgt_queue_size[pos]+streamSize-1)/streamSize;
             cudaStream_t streams[nStreams+1];
             int offset = 0, size_eff = 0;
@@ -581,7 +620,7 @@ int main(int argc, char *argv[]) {
         	}
         }
 
-        check_values(layer,h_output_activations);
+        //check_values(layer,h_output_activations);
         cudaFreeHost(h_output_activations);
 
     }
