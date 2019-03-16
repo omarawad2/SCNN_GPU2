@@ -22,6 +22,7 @@ struct device_data {
 	float *act_queue; 
     int *act_queue_x;
 	int *act_queue_y;
+    int *act_queue_size;
     
 	float *wgt_queue;
     int *wgt_queue_k;
@@ -81,17 +82,10 @@ void check_grid(dim3 grid, std::string kernel){
 }
 
 template <typename T>
-void print(const T a, int size = 20){
-    for(int i=0; i<size;i++)
-        printf("%4.4f;",a[i]);
-    printf("\n");
-}
-
-template <typename T>
-T* host2Dev(uint64_t size, const T *h_data, std::string task){
+T* host2Dev(uint64_t size, const T *h_data, std::string task, cudaStream_t stream){
     T* d_data;
     check_error(cudaMalloc((void**) &d_data, size*sizeof(T)),task);
-    check_error(cudaMemcpy(d_data, h_data, size*sizeof(T), cudaMemcpyHostToDevice),task);
+    check_error(cudaMemcpyAsync(d_data, h_data, size*sizeof(T), cudaMemcpyHostToDevice, stream),task);
 
     return d_data;
 }
@@ -165,6 +159,7 @@ __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int 
     }
 }
 
+
 //naive implmentation
 __global__ void kComputePE(unsigned int batches, int n_offset, int k_offset, int W, int H, unsigned int stride, 
 		int *act_queue_size, int wgt_queue_size, int offset, int size_eff, device_data dev, 
@@ -210,7 +205,9 @@ void addBias(int N, int K, int W, int H, const Layer &layer, float *d_output_act
     double timeStampA = getTimeStamp();
     #endif
 
-    float *d_bias = host2Dev(layer.getMaxIndex("bias"), layer.bias,"allocate device bias");
+    cudaStream_t stream1;
+    cudaStreamCreate(&stream1);
+    float *d_bias = host2Dev(layer.getMaxIndex("bias"), layer.bias,"allocate device bias", stream1);
 
     dim3 block(16, 16, 4);
     dim3 grid((H+block.x-1)/block.x,(W+block.y-1)/block.y,(K+block.z-1)/block.z);
@@ -222,7 +219,7 @@ void addBias(int N, int K, int W, int H, const Layer &layer, float *d_output_act
         cudaStreamCreate(&streams[n+1]);
         kAddBias<<<grid, block,0,streams[n+1]>>>(n,K,W,H,d_bias,d_output_activations);
     }
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 
     check_error(cudaFree(d_bias),"free device bias");
 
@@ -249,7 +246,7 @@ void relu(int N, int K, int W, int H, const Layer &layer, float *d_output_activa
             cudaStreamCreate(&streams[n+1]);
             kRelu<<<grid,block,0,streams[n+1]>>>(N,K,W,H,d_output_activations);
         }
-        cudaDeviceSynchronize();
+        //cudaDeviceSynchronize();
     }
 
     #ifndef GLOBAL_TIME
@@ -322,14 +319,16 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 
     int stride = layer.stride;
 
+    //TODO: allocate it once per layer (in main) and reuse
+    int *d_act_queue_size;
+    check_error(cudaMalloc((void**) &d_act_queue_size, sizeof(int)),"allocate activations queue size");
+
     // Iterate strides
     for(int sx = 0; sx < stride; sx++) {
         for(int sy = 0; sy < stride; sy++) {
 
         	int pos = (ct+ck)*stride*stride + sx*stride + sy;
-
-            int *d_act_queue_size;
-    		check_error(cudaMalloc((void**) &d_act_queue_size, sizeof(int)),"allocate activations queue size");
+            
     		check_error(cudaMemset(d_act_queue_size,0, sizeof(int)),"set activations queue size to zero");
 
             // Populate activations queue
@@ -341,7 +340,7 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
             check_error(cudaMemcpy(&act_queue_size, d_act_queue_size, sizeof(int), cudaMemcpyDeviceToHost),
                 "copy activation queue size from device to host");
             
-            int streamSize = 20000;
+            int streamSize = 30000;
             int nStreams = (hst.wgt_queue_size[pos]+streamSize-1)/streamSize;
             cudaStream_t streams[nStreams+1];
             int offset = 0, size_eff = 0;
@@ -365,12 +364,13 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
                 computePE(n,W,H,layer,act_queue_size,hst.wgt_queue_size[pos],d_act_queue_size,dev,size_eff,offset,
 					d_output_activations,streams[i+1]);
             }
-
-            //free GPU resources
-            check_error(cudaFree(d_act_queue_size),"free device activations size");
-
+            cudaDeviceSynchronize();
+             for(int i = 0; i< nStreams;i++){
+                cudaStreamDestroy(streams[i+1]);
+             }
         }
     }
+    check_error(cudaFree(d_act_queue_size),"free device activations size");
 }
 
 //############################################### Main #################################################################
@@ -507,7 +507,9 @@ int main(int argc, char *argv[]) {
         int *d_act_queue_x, *d_act_queue_y;
         int *d_wgt_queue_k, *d_wgt_queue_r, *d_wgt_queue_s;
 
-    	float *d_act = host2Dev(layer.getMaxIndex("activations"), layer.activations,"copy device activations");
+        cudaStream_t stream1, stream2;
+        cudaStreamCreate(&stream1);
+    	float *d_act = host2Dev(layer.getMaxIndex("activations"), layer.activations,"copy device activations",stream1);
 
         //max. size is one activation channel
         check_error(cudaMalloc((void**) &d_act_queue, X*Y*sizeof(float)),"allocate device activations queue");
@@ -520,12 +522,16 @@ int main(int argc, char *argv[]) {
         check_error(cudaMalloc((void**) &d_wgt_queue_r, Kc*R*S*sizeof(int)),"allocate device weights queue R dim");
         check_error(cudaMalloc((void**) &d_wgt_queue_s, Kc*R*S*sizeof(int)),"allocate device weights queue S dim");
 
+       // int *d_act_queue_size;
+        //check_error(cudaMalloc((void**) &d_act_queue_size, C*sizeof(int)),"allocate activations queue size");
+
 		//copy to struct
 		device_data dev;
 		dev.act = d_act;
 		dev.act_queue = d_act_queue;
 		dev.act_queue_x = d_act_queue_x;
 		dev.act_queue_y = d_act_queue_y;
+        //dev.act_queue_size = d_act_queue_size;
 		dev.wgt_queue = d_wgt_queue;
 		dev.wgt_queue_k = d_wgt_queue_k;
 		dev.wgt_queue_r = d_wgt_queue_r;
@@ -533,6 +539,7 @@ int main(int argc, char *argv[]) {
 
         for(int n = 0; n < N; n++) {
             kc = n;
+            //TODO: parallelize across different activation channels
             for(int ct = 0; ct < C; ct+=Ck) {
                 for(int ck = 0; ck < Ck; ck++) {
                     computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,hst,dev,d_output_activations);
@@ -543,7 +550,8 @@ int main(int argc, char *argv[]) {
 
         relu(N, K, W, H, layer, d_output_activations);
 
-        check_error(cudaMemcpy(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost),
+        cudaStreamCreate(&stream2);
+        check_error(cudaMemcpyAsync(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost, stream2),
                 "copy output activations from device to host");
 
 		double timeStampB = getTimeStamp();
@@ -561,6 +569,8 @@ int main(int argc, char *argv[]) {
         check_error(cudaFree(d_wgt_queue_k),"free device weights queue K dim");
         check_error(cudaFree(d_wgt_queue_r),"free device weights queue R dim");
         check_error(cudaFree(d_wgt_queue_s),"free device weights queue S dim");
+
+        //check_error(cudaFree(d_act_queue_size),"free device activations size");
         ///////////////////////////
 
 		for(int ck = 0; ck < C; ck++) {
