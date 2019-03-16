@@ -165,6 +165,10 @@ __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int 
     }
 }
 
+static __device__ __forceinline__ unsigned int log2(unsigned int a){
+    return (a) ? (__float_as_int(__uint2float_rz(a)) >> 23) - 127 : 0;
+}
+
 //naive implmentation
 __global__ void kComputePE(unsigned int batches, int n_offset, int k_offset, int W, int H, unsigned int stride, 
 		int *act_queue_size, int wgt_queue_size, int offset, int size_eff, device_data dev, 
@@ -172,24 +176,45 @@ __global__ void kComputePE(unsigned int batches, int n_offset, int k_offset, int
     //TODO: use shared mem.
     //TODO: try different configurations
 
-    int ff = (threadIdx.x + blockIdx.x*blockDim.x) << (int)__log2f(batches);
+	__shared__ float sh_wgt_queue[1024];
+	__shared__ int sh_wgt_queue_k[1024];
+	__shared__ int sh_wgt_queue_r[1024];
+	__shared__ int sh_wgt_queue_s[1024];
+
+	int f = threadIdx.x << log2(batches);
+	int i = threadIdx.y;
+    int ff = (threadIdx.x + blockIdx.x*blockDim.x) << log2(batches);
     int ii = threadIdx.y + blockIdx.y*blockDim.y;
 
-    if(ii < *act_queue_size && ff < size_eff){
+	if(ff < size_eff) {
+
+		if(i < batches) {
+			sh_wgt_queue[f+i] = (dev.wgt_queue + offset)[ff+i];
+			sh_wgt_queue_k[f+i] = (dev.wgt_queue_k + offset)[ff+i];
+			sh_wgt_queue_r[f+i] = (dev.wgt_queue_r + offset)[ff+i];
+			sh_wgt_queue_s[f+i] = (dev.wgt_queue_s + offset)[ff+i];
+		}
+
+	}
+
+	__syncthreads();
+
+    if(ii < *act_queue_size && ff < size_eff) {
         float act = dev.act_queue[ii];
         int x = dev.act_queue_x[ii];
         int y = dev.act_queue_y[ii];
 
+		//#pragma unroll 8
 		for(int b = 0; b < batches; b++) {
 
-		    float wgt = (dev.wgt_queue + offset)[ff+b];
-		    int k = (dev.wgt_queue_k + offset)[ff+b];
-		    int r = (dev.wgt_queue_r + offset)[ff+b];
-		    int s = (dev.wgt_queue_s + offset)[ff+b];
+		    float wgt = sh_wgt_queue[f+b];
+		    int k = sh_wgt_queue_k[f+b];
+		    int r = sh_wgt_queue_r[f+b];
+		    int s = sh_wgt_queue_s[f+b];
 
 		    //works for power of 2 strides
-		    int w = (x-r) >> (int)__log2f(stride);
-		    int h = (y-s) >> (int)__log2f(stride);
+		    int w = (x-r) >> log2(stride);
+		    int h = (y-s) >> log2(stride);
 
 		    if(w >= 0 && w < W && h >= 0 && h < H) {
 		        int pos = n_offset + k * k_offset + w * H + h;
