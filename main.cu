@@ -319,25 +319,21 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 
     int stride = layer.stride;
 
-    //TODO: allocate it once per layer (in main) and reuse
-    int *d_act_queue_size;
-    check_error(cudaMalloc((void**) &d_act_queue_size, sizeof(int)),"allocate activations queue size");
-
     // Iterate strides
     for(int sx = 0; sx < stride; sx++) {
         for(int sy = 0; sy < stride; sy++) {
 
         	int pos = (ct+ck)*stride*stride + sx*stride + sy;
             
-    		check_error(cudaMemset(d_act_queue_size,0, sizeof(int)),"set activations queue size to zero");
+    		check_error(cudaMemset(dev.act_queue_size,0, sizeof(int)),"set activations queue size to zero");
 
             // Populate activations queue
-            populate_effectual_activations(n,ct+ck,sx,sy,stride,layer,dev,d_act_queue_size);
+            populate_effectual_activations(n,ct+ck,sx,sy,stride,layer,dev,dev.act_queue_size);
 
             //TODO optimize size usage (computePE needs to read it from mem, and we need to read it from host
             // in order to assign the block size
             int act_queue_size;
-            check_error(cudaMemcpy(&act_queue_size, d_act_queue_size, sizeof(int), cudaMemcpyDeviceToHost),
+            check_error(cudaMemcpy(&act_queue_size, dev.act_queue_size, sizeof(int), cudaMemcpyDeviceToHost),
                 "copy activation queue size from device to host");
             
             int streamSize = 30000;
@@ -361,7 +357,7 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 					cudaMemcpyHostToDevice, streams[i+1]), "copy weights queue s from host to device");
                 
 				//do actual convolution
-                computePE(n,W,H,layer,act_queue_size,hst.wgt_queue_size[pos],d_act_queue_size,dev,size_eff,offset,
+                computePE(n,W,H,layer,act_queue_size,hst.wgt_queue_size[pos],dev.act_queue_size,dev,size_eff,offset,
 					d_output_activations,streams[i+1]);
             }
             cudaDeviceSynchronize();
@@ -370,7 +366,6 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
              }
         }
     }
-    check_error(cudaFree(d_act_queue_size),"free device activations size");
 }
 
 //############################################### Main #################################################################
@@ -522,8 +517,8 @@ int main(int argc, char *argv[]) {
         check_error(cudaMalloc((void**) &d_wgt_queue_r, Kc*R*S*sizeof(int)),"allocate device weights queue R dim");
         check_error(cudaMalloc((void**) &d_wgt_queue_s, Kc*R*S*sizeof(int)),"allocate device weights queue S dim");
 
-       // int *d_act_queue_size;
-        //check_error(cudaMalloc((void**) &d_act_queue_size, C*sizeof(int)),"allocate activations queue size");
+        int *d_act_queue_size;
+        check_error(cudaMalloc((void**) &d_act_queue_size, C*sizeof(int)),"allocate activations queue size");
 
 		//copy to struct
 		device_data dev;
@@ -531,7 +526,7 @@ int main(int argc, char *argv[]) {
 		dev.act_queue = d_act_queue;
 		dev.act_queue_x = d_act_queue_x;
 		dev.act_queue_y = d_act_queue_y;
-        //dev.act_queue_size = d_act_queue_size;
+        dev.act_queue_size = d_act_queue_size;
 		dev.wgt_queue = d_wgt_queue;
 		dev.wgt_queue_k = d_wgt_queue_k;
 		dev.wgt_queue_r = d_wgt_queue_r;
@@ -570,7 +565,7 @@ int main(int argc, char *argv[]) {
         check_error(cudaFree(d_wgt_queue_r),"free device weights queue R dim");
         check_error(cudaFree(d_wgt_queue_s),"free device weights queue S dim");
 
-        //check_error(cudaFree(d_act_queue_size),"free device activations size");
+        check_error(cudaFree(d_act_queue_size),"free device activations size");
         ///////////////////////////
 
 		for(int ck = 0; ck < C; ck++) {
