@@ -348,7 +348,7 @@ void computeTile(int n, int C, int Kc, int X, int Y, int K, int W, int H, int R,
                 //"copy activation queue size from device to host");
            }
 
-            //should be removed
+            //should be removed (computePE should for populate of the same activation channel only)...use cudaStreamSynchronize
             cudaDeviceSynchronize();
 
             check_error(cudaMemcpyAsync(act_queue_size, dev.act_queue_size, C*sizeof(int), cudaMemcpyDeviceToHost, pop_streams[0]),
