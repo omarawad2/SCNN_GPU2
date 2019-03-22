@@ -175,21 +175,17 @@ __global__ void kComputePE(unsigned int batches, int n_offset, int k_offset, int
 
     int x_idx = threadIdx.x + blockIdx.x*blockDim.x*batches;
     int y_idx = threadIdx.y + blockIdx.y*blockDim.y;
-    int f = threadIdx.y;
     int log_x = (int)__log2f(blockDim.x);
+    int g_idx = x_idx + threadIdx.y*blockDim.x;
+    int s_idx = threadIdx.x + threadIdx.y*blockDim.x;
 
     //part before syncthreads can be optimized
-   	if(f < batches){
-   		int hop = f << log_x;
-   		int idx = x_idx + hop;
- 		int sh_idx = threadIdx.x + hop;
-   		if(idx < size_eff){
-	    	sh_wgt_queue[sh_idx].value = (dev.wgt_queue + offset)[idx];
-		    sh_wgt_queue[sh_idx].k = (dev.wgt_queue_k + offset)[idx];
-		    sh_wgt_queue[sh_idx].r = (dev.wgt_queue_r + offset)[idx];
-		    sh_wgt_queue[sh_idx].s = (dev.wgt_queue_s + offset)[idx];
+   		if(g_idx < size_eff && s_idx < blockDim.x*batches){
+	    	sh_wgt_queue[s_idx].value = (dev.wgt_queue + offset)[g_idx];
+		    sh_wgt_queue[s_idx].k = (dev.wgt_queue_k + offset)[g_idx];
+		    sh_wgt_queue[s_idx].r = (dev.wgt_queue_r + offset)[g_idx];
+		    sh_wgt_queue[s_idx].s = (dev.wgt_queue_s + offset)[g_idx];
    		}
-   	}
     __syncthreads();
 
     if(y_idx < *act_queue_size){	
@@ -199,10 +195,9 @@ __global__ void kComputePE(unsigned int batches, int n_offset, int k_offset, int
 
 		for(int b = 0; b < batches; b++) {
 			int hop = b << log_x;
-			int idx = x_idx + hop;
 			int sh_idx = threadIdx.x + hop;
 
-			if(idx >= size_eff)
+			if(x_idx + hop >= size_eff)
 				continue;
 	 		
             float wgt  = sh_wgt_queue[sh_idx].value;
@@ -324,10 +319,10 @@ void computePE(int n, int W, int H, const Layer &layer, int act_queue_size, int 
     int k_offset = W*H;
     int n_offset = n*K*k_offset;
     //TODO can be improved
-    unsigned int batches = (layer.type == "fc") ? 32 : 2;
+    unsigned int batches = (layer.type == "fc") ? 64 : 4;
 
     //block size might be different for conv and fc
-    dim3 block(32, 32);
+    dim3 block(16, 64);
     int batch_size = block.x*batches;
     dim3 grid((size_eff+batch_size-1)/batch_size,(act_queue_size+block.y-1)/block.y);
     //check_grid(grid,"computePE");
