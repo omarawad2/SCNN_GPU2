@@ -160,28 +160,58 @@ __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int 
 }
 
 
-//naive implmentation
+struct pixel{
+    float value;
+    int k, r, s, padding;
+};
+
 __global__ void kComputePE(unsigned int batches, int n_offset, int k_offset, int W, int H, unsigned int stride, 
 		int *act_queue_size, int wgt_queue_size, int offset, int size_eff, device_data dev, 
 		float *d_output_activations) {
     //TODO: use shared mem.
     //TODO: try different configurations
 
-    int ff = (threadIdx.x + blockIdx.x*blockDim.x) << (int)__log2f(batches);
-    int ii = threadIdx.y + blockIdx.y*blockDim.y;
+    __shared__ pixel sh_wgt_queue[2300];
 
-    if(ii < *act_queue_size && ff < size_eff){
-        float act = dev.act_queue[ii];
-        int x = dev.act_queue_x[ii];
-        int y = dev.act_queue_y[ii];
+    int x_idx = threadIdx.x + blockIdx.x*blockDim.x*batches;
+    int y_idx = threadIdx.y + blockIdx.y*blockDim.y;
+    int f = threadIdx.y;
+    int log_x = (int)__log2f(blockDim.x);
+
+    //part before syncthreads can be optimized
+   	if(f < batches){
+   		int hop = f << log_x;
+   		int idx = x_idx + hop;
+ 		int sh_idx = threadIdx.x + hop;
+   		if(idx < size_eff){
+	    	sh_wgt_queue[sh_idx].value = (dev.wgt_queue + offset)[idx];
+		    sh_wgt_queue[sh_idx].k = (dev.wgt_queue_k + offset)[idx];
+		    sh_wgt_queue[sh_idx].r = (dev.wgt_queue_r + offset)[idx];
+		    sh_wgt_queue[sh_idx].s = (dev.wgt_queue_s + offset)[idx];
+   		}
+   	}
+    __syncthreads();
+
+    if(y_idx < *act_queue_size){	
+        float act = dev.act_queue[y_idx];
+        int x = dev.act_queue_x[y_idx];
+        int y = dev.act_queue_y[y_idx];
 
 		for(int b = 0; b < batches; b++) {
+			int hop = b << log_x;
+			int idx = x_idx + hop;
+			int sh_idx = threadIdx.x + hop;
 
-		    float wgt = (dev.wgt_queue + offset)[ff+b];
-		    int k = (dev.wgt_queue_k + offset)[ff+b];
-		    int r = (dev.wgt_queue_r + offset)[ff+b];
-		    int s = (dev.wgt_queue_s + offset)[ff+b];
+			if(idx >= size_eff)
+				continue;
+	 		
+            float wgt  = sh_wgt_queue[sh_idx].value;
+            int k = sh_wgt_queue[sh_idx].k;
+            int r = sh_wgt_queue[sh_idx].r;
+            int s = sh_wgt_queue[sh_idx].s;
 
+            float mult = act*wgt;
+        
 		    //works for power of 2 strides
 		    int w = (x-r) >> (int)__log2f(stride);
 		    int h = (y-s) >> (int)__log2f(stride);
@@ -190,9 +220,8 @@ __global__ void kComputePE(unsigned int batches, int n_offset, int k_offset, int
 		        int pos = n_offset + k * k_offset + w * H + h;
 		        //TODO: memory access not coalesced
 		        //TODO: try to remove atomicAdd
-		        atomicAdd(d_output_activations + pos, act * wgt);
+		        atomicAdd(d_output_activations + pos, mult);
 		    }
-
 		}
     }
 }
@@ -211,7 +240,7 @@ void addBias(int N, int K, int W, int H, const Layer &layer, float *d_output_act
 
     dim3 block(16, 16, 4);
     dim3 grid((H+block.x-1)/block.x,(W+block.y-1)/block.y,(K+block.z-1)/block.z);
-    check_grid(grid,"addBias");
+    //check_grid(grid,"addBias");
 
     cudaStream_t streams[N+1];
 
@@ -240,7 +269,7 @@ void relu(int N, int K, int W, int H, const Layer &layer, float *d_output_activa
     dim3 grid((K*W*H+block.x-1)/block.x,1);
     
     if(layer.ReLU){
-        check_grid(grid,"relu");
+        //check_grid(grid,"relu");
         cudaStream_t streams[N+1];
         for(int n = 0; n < N; n++){
             cudaStreamCreate(&streams[n+1]);
@@ -269,7 +298,7 @@ void populate_effectual_activations(int n, int channel, int sx, int sy, int stri
 
     dim3 block(32, 32);
     dim3 grid((Y+block.x-1)/block.x,(X+block.y-1)/block.y);
-    check_grid(grid,"populate_effectual_activations");
+    //check_grid(grid,"populate_effectual_activations");
 
     //TODO:add streams
     kPopulate_effectual_activations<<<grid,block>>>(n,channel,sx,sy,C,X,Y,stride,dev,act_queue_size);
@@ -289,21 +318,22 @@ void computePE(int n, int W, int H, const Layer &layer, int act_queue_size, int 
     double timeStampA = getTimeStamp();
     #endif
 
-	int K = (int) layer.wgt_shape[0];
-	int stride = layer.stride;
+    int K = (int) layer.wgt_shape[0];
+    int stride = layer.stride;
 
-	int n_offset = n*K*W*H;
-	int k_offset = W*H;
-	//TODO can be improved
-	unsigned int batches = (layer.type == "fc") ? 8 : 2;
+    int k_offset = W*H;
+    int n_offset = n*K*k_offset;
+    //TODO can be improved
+    unsigned int batches = (layer.type == "fc") ? 32 : 2;
 
     //block size might be different for conv and fc
-    dim3 block(128, 8);
-    dim3 grid(((size_eff/batches)+block.x-1)/block.x,(act_queue_size+block.y-1)/block.y);
-    check_grid(grid,"computePE");
+    dim3 block(32, 32);
+    int batch_size = block.x*batches;
+    dim3 grid((size_eff+batch_size-1)/batch_size,(act_queue_size+block.y-1)/block.y);
+    //check_grid(grid,"computePE");
 
     kComputePE<<<grid,block,0,stream>>>(batches,n_offset,k_offset,W,H,stride,d_act_queue_size,wgt_queue_size,offset,
-			size_eff,dev,d_output_activations);
+            size_eff,dev,d_output_activations);
     //cudaDeviceSynchronize();
 
     #ifndef GLOBAL_TIME
@@ -588,6 +618,6 @@ int main(int argc, char *argv[]) {
     }
 
 	printf("Total time: %.6f\n",total_time);
-
+    cudaDeviceReset();
     return 0;
 }
