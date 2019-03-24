@@ -168,7 +168,6 @@ struct pixel{
 __global__ void kComputePE(unsigned int batches, int n_offset, int k_offset, int W, int H, unsigned int stride, 
 		int *act_queue_size, int wgt_queue_size, int offset, int size_eff, device_data dev, 
 		float *d_output_activations) {
-    //TODO: use shared mem.
     //TODO: try different configurations
 
     __shared__ pixel sh_wgt_queue[2300];
@@ -223,20 +222,17 @@ __global__ void kComputePE(unsigned int batches, int n_offset, int k_offset, int
 
 //############################################### CPU SCNN #############################################################
 
-void addBias(int N, int K, int W, int H, const Layer &layer, float *d_output_activations) {
+void addBias(int N, int K, int W, int H, const Layer &layer, float *d_output_activations, const float *d_bias) {
 
     #ifndef GLOBAL_TIME
     double timeStampA = getTimeStamp();
     #endif
 
-    cudaStream_t stream1;
-    cudaStreamCreate(&stream1);
-    float *d_bias = host2Dev(layer.getMaxIndex("bias"), layer.bias,"allocate device bias", stream1);
-
     dim3 block(16, 16, 4);
     dim3 grid((H+block.x-1)/block.x,(W+block.y-1)/block.y,(K+block.z-1)/block.z);
     //check_grid(grid,"addBias");
 
+    //TODO: we can stream on the channels instead
     cudaStream_t streams[N+1];
 
     for(int n=0; n< N; n++){
@@ -244,8 +240,6 @@ void addBias(int N, int K, int W, int H, const Layer &layer, float *d_output_act
         kAddBias<<<grid, block,0,streams[n+1]>>>(n,K,W,H,d_bias,d_output_activations);
     }
     //cudaDeviceSynchronize();
-
-    check_error(cudaFree(d_bias),"free device bias");
 
     #ifndef GLOBAL_TIME
     double timeStampB = getTimeStamp();
@@ -263,6 +257,7 @@ void relu(int N, int K, int W, int H, const Layer &layer, float *d_output_activa
     dim3 block(1024, 1);
     dim3 grid((K*W*H+block.x-1)/block.x,1);
     
+    //TODO: we can stream on the channels instead
     if(layer.ReLU){
         //check_grid(grid,"relu");
         cudaStream_t streams[N+1];
@@ -519,7 +514,11 @@ int main(int argc, char *argv[]) {
 
     	double timeStampA = getTimeStamp();
 
-        addBias(N, K, W, H, layer, d_output_activations);
+        cudaStream_t streams[3];
+        cudaStreamCreate(&streams[0]);
+        float *d_bias = host2Dev(layer.getMaxIndex("bias"), layer.bias,"allocate device bias", streams[0]);
+
+        addBias(N, K, W, H, layer, d_output_activations, d_bias);
 
         ////////core compute/////////////
         // Allocate space for the queues on device (allocate once and reuse)
@@ -527,9 +526,8 @@ int main(int argc, char *argv[]) {
         int *d_act_queue_x, *d_act_queue_y;
         int *d_wgt_queue_k, *d_wgt_queue_r, *d_wgt_queue_s;
 
-        cudaStream_t stream1, stream2;
-        cudaStreamCreate(&stream1);
-    	float *d_act = host2Dev(layer.getMaxIndex("activations"), layer.activations,"copy device activations",stream1);
+        cudaStreamCreate(&streams[1]);
+    	float *d_act = host2Dev(layer.getMaxIndex("activations"), layer.activations,"copy device activations",streams[1]);
 
         //max. size is one activation channel
         check_error(cudaMalloc((void**) &d_act_queue, X*Y*sizeof(float)),"allocate device activations queue");
@@ -570,8 +568,8 @@ int main(int argc, char *argv[]) {
 
         relu(N, K, W, H, layer, d_output_activations);
 
-        cudaStreamCreate(&stream2);
-        check_error(cudaMemcpyAsync(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost, stream2),
+        cudaStreamCreate(&streams[2]);
+        check_error(cudaMemcpyAsync(h_output_activations, d_output_activations, bytes, cudaMemcpyDeviceToHost, streams[2]),
                 "copy output activations from device to host");
 
 		double timeStampB = getTimeStamp();
@@ -579,6 +577,7 @@ int main(int argc, char *argv[]) {
 		total_time += timeStampB-timeStampA;
 
         //free GPU resources
+        check_error(cudaFree(d_bias),"free device bias");
         check_error(cudaFree(d_act),"free device activations");
         
         check_error(cudaFree(d_act_queue),"free device activations queue");
