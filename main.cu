@@ -291,6 +291,7 @@ void populate_effectual_activations(int n, int channel, int sx, int sy, int stri
     //check_grid(grid,"populate_effectual_activations");
 
     //TODO:add streams
+    //TODO: launch different kernel for first layer
     kPopulate_effectual_activations<<<grid,block>>>(n,channel,sx,sy,C,X,Y,stride,dev,act_queue_size);
     cudaDeviceSynchronize();
 
@@ -366,7 +367,8 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
                 offset = i*streamSize;
                 size_eff = (offset+streamSize > hst.wgt_queue_size[pos])? hst.wgt_queue_size[pos]-offset : streamSize;
                 cudaStreamCreate(&streams[i+1]);
-
+                
+                //TODO: group the 4 copies in 1 to use the full GPU throughput?
                 check_error(cudaMemcpyAsync(dev.wgt_queue+offset, hst.wgt_queue[pos]+offset, size_eff*sizeof(float),
 					cudaMemcpyHostToDevice, streams[i+1]), "copy weights queue from host to device");
                 check_error(cudaMemcpyAsync(dev.wgt_queue_k+offset, hst.wgt_queue_k[pos]+offset, size_eff*sizeof(int),
@@ -606,7 +608,7 @@ int main(int argc, char *argv[]) {
         	}
         }
 
-        check_values(layer,h_output_activations);
+        //check_values(layer,h_output_activations);
         cudaFreeHost(h_output_activations);
 
     }
