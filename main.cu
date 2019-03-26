@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <sstream>
+#include <fstream>
 
 #define GLOBAL_TIME
 
@@ -31,30 +33,41 @@ struct device_data {
 
 //############################################### Read networks ########################################################
 
-std::vector<Layer> read_bvlc_alexnet() {
-    std::vector<Layer> network;
-    network.push_back(Layer("bvlc_alexnet","conv1","conv",true,4,0));
-    network.push_back(Layer("bvlc_alexnet","conv2","conv",true,1,2));
-    network.push_back(Layer("bvlc_alexnet","conv3","conv",true,1,1));
-    network.push_back(Layer("bvlc_alexnet","conv4","conv",true,1,1));
-    network.push_back(Layer("bvlc_alexnet","conv5","conv",true,1,1));
-    network.push_back(Layer("bvlc_alexnet","fc6","fc",true,1,0));
-    network.push_back(Layer("bvlc_alexnet","fc7","fc",true,1,0));
-    network.push_back(Layer("bvlc_alexnet","fc8","fc",false,1,0));
-    return network;
+void check_path(const std::string &path) {
+	std::ifstream file(path.c_str());
+    if(!file.good()) {
+    	throw std::runtime_error("The path " + path + " does not exist.");
+    }
 }
 
-std::vector<Layer> read_vgg_cnn_s() {
+std::vector<Layer> read_trace_params(const std::string network_name) {
     std::vector<Layer> network;
-    network.push_back(Layer("vgg_cnn_s","conv1","conv",true,2,0));
-    network.push_back(Layer("vgg_cnn_s","conv2","conv",true,1,0));
-    network.push_back(Layer("vgg_cnn_s","conv3","conv",true,1,1));
-    network.push_back(Layer("vgg_cnn_s","conv4","conv",true,1,1));
-    network.push_back(Layer("vgg_cnn_s","conv5","conv",true,1,1));
-    network.push_back(Layer("vgg_cnn_s","fc6","fc",true,1,0));
-    network.push_back(Layer("vgg_cnn_s","fc7","fc",true,1,0));
-    network.push_back(Layer("vgg_cnn_s","fc8","fc",false,1,0));
-    return network;
+
+	check_path("net_traces/" + network_name);
+    std::string path = "net_traces/" + network_name + "/trace_params.csv";
+    check_path(path);
+
+    std::ifstream myfile (path.c_str());
+    if (myfile.is_open()) {
+
+    	std::string line;
+        while (getline(myfile,line)) {
+
+        	std::vector<std::string> words;
+           	std::string word;
+           	std::stringstream ss_line(line);
+            while (getline(ss_line,word,','))
+            	words.push_back(word);
+
+			// Format: Layer_name, Type, ReLU?, stride, padding
+			network.push_back(Layer(network_name,words[0],words[1],(words[2] == "true" ? true : false), 
+					atoi(words[3].c_str()),	atoi(words[4].c_str())));
+
+        }
+        myfile.close();
+    }
+
+	return network;
 }
 
 //############################################### Auxiliary functions ##################################################
@@ -383,10 +396,14 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 
 int main(int argc, char *argv[]) {
 
+	if(argc != 2) {
+		printf("Error in number of parameters, usage: %s <network_name>\n",argv[0]);
+		return -1;
+	}
+
     double total_time = 0.0;
 
-    std::vector<Layer> network = read_bvlc_alexnet();
-    //std::vector<Layer> network = read_vgg_cnn_s();
+    std::vector<Layer> network = read_trace_params(argv[1]);
 
     for(int i = 0; i < network.size(); i++) {
 
