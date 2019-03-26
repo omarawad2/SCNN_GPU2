@@ -422,7 +422,7 @@ void computePE(int n, int W, int H, const Layer &layer, int act_queue_size, int 
 }
 
 void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int W, int H, int R, int S,
-        const Layer &layer, const host_data &hst, device_data dev, float *d_output_activations) {
+        const Layer &layer, const host_data &hst, device_data dev, float *d_output_activations, cudaStream_t *streams, int nStreams) {
 
     int stride = layer.stride;
 
@@ -443,30 +443,25 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
             check_error(cudaMemcpy(&act_queue_size, dev.act_queue_size, sizeof(int), cudaMemcpyDeviceToHost),
                 "copy activation queue size from device to host");
             
-            int streamSize = (layer.type == "fc") ? 100000 : 300000;
-            int nStreams = (hst.wgt_queue_size[pos]+streamSize-1)/streamSize;
-            cudaStream_t streams[nStreams+1];
+            int streamSize = (hst.wgt_queue_size[pos]+nStreams-1)/nStreams;
             int offset = 0, size_eff = 0;
 
 			// Transfer working weights to GPU
             for(int i = 0; i< nStreams;i++){
                 offset = i*streamSize;
                 size_eff = (offset+streamSize > hst.wgt_queue_size[pos])? hst.wgt_queue_size[pos]-offset : streamSize;
-                cudaStreamCreate(&streams[i+1]);
                 
                 check_error(cudaMemcpyAsync(dev.wgt_queue+offset, hst.wgt_queue[pos]+offset, size_eff*sizeof(wgt),
-					cudaMemcpyHostToDevice, streams[i+1]), "copy weights queue from host to device");
+					cudaMemcpyHostToDevice, streams[i]), "copy weights queue from host to device");
                 
 				//do actual convolution
                 computePE(n,W,H,layer,act_queue_size,hst.wgt_queue_size[pos],dev.act_queue_size,dev,size_eff,offset,
-					d_output_activations,streams[i+1]);
+					d_output_activations,streams[i]);
             }
             cudaDeviceSynchronize();
-             for(int i = 0; i< nStreams;i++){
-                cudaStreamDestroy(streams[i+1]);
-             }
         }
     }
+
 }
 
 //############################################### Main #################################################################
@@ -613,17 +608,26 @@ int main(int argc, char *argv[]) {
 		dev.act_queue_x = d_act_queue_x;
 		dev.act_queue_y = d_act_queue_y;
         dev.act_queue_size = d_act_queue_size;
-		dev.wgt_queue = d_wgt_queue;		
+		dev.wgt_queue = d_wgt_queue;
+
+        int nStreams = (layer.type == "fc") ? 14 : 1;
+        cudaStream_t *computeTile_streams = (cudaStream_t *) malloc(nStreams * sizeof(cudaStream_t));
+        for(int i = 0; i < nStreams; i++)
+            cudaStreamCreate(&computeTile_streams[i]);		
 
         for(int n = 0; n < N; n++) {
             kc = n;
             //TODO: parallelize across different activation channels
             for(int ct = 0; ct < C; ct+=Ck) {
                 for(int ck = 0; ck < Ck; ck++) {
-                    computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,hst,dev,d_output_activations);
+                    computeTile(n,ct,ck,kc,Kc,X,Y,K,W,H,R,S,layer,hst,dev,d_output_activations,computeTile_streams,nStreams);
                 }
                 kc += Kc;
             }
+        }
+
+        for(int i = 0; i< nStreams;i++){
+        cudaStreamDestroy(computeTile_streams[i]);
         }
 
         relu(N, K, W, H, layer, d_output_activations);
