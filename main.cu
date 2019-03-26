@@ -171,6 +171,24 @@ __global__ void kPopulate_effectual_activations(int n, int channel, int sx, int 
     }
 }
 
+//naive implementation
+__global__ void kPopulate_effectual_activations(int n, int channel, int C, int X, int Y, device_data dev, 
+		int *act_queue_size) {
+
+    int y = threadIdx.x + blockIdx.x*blockDim.x;
+    int x = threadIdx.y + blockIdx.y*blockDim.y;
+
+    if(x < X && y < Y) {
+    	int pos = C*X*Y*n + X*Y*channel + x*Y + y;
+        float act_bits = dev.act[pos];
+        if(act_bits !=0) {
+        	int index = atomicAdd(act_queue_size,1);
+        	dev.act_queue[index] = act_bits;
+            dev.act_queue_x[index] = x;
+            dev.act_queue_y[index] = y;
+        }
+    }
+}
 
 struct pixel{
     float value;
@@ -221,6 +239,59 @@ __global__ void kComputePE(unsigned int batches, int n_offset, int k_offset, int
 		    //works for power of 2 strides
 		    int w = (x-r) >> (int)__log2f(stride);
 		    int h = (y-s) >> (int)__log2f(stride);
+
+		    if(w >= 0 && w < W && h >= 0 && h < H) {
+		        int pos = n_offset + k * k_offset + w * H + h;
+		        //TODO: memory access not coalesced
+		        //TODO: try to remove atomicAdd
+		        atomicAdd(d_output_activations + pos, mult);
+		    }
+		}
+    }
+}
+
+__global__ void kComputePE(unsigned int batches, int n_offset, int k_offset, int W, int H,  int *act_queue_size, 
+		int wgt_queue_size, int offset, int size_eff, device_data dev, float *d_output_activations) {
+    //TODO: try different configurations
+
+    __shared__ pixel sh_wgt_queue[1024];
+
+    int x_idx = threadIdx.x + blockIdx.x*blockDim.x*batches;
+    int y_idx = threadIdx.y + blockIdx.y*blockDim.y;
+    int log_x = (int)__log2f(blockDim.x);
+    int g_idx = x_idx + threadIdx.y*blockDim.x;
+    int s_idx = threadIdx.x + threadIdx.y*blockDim.x;
+
+    //part before syncthreads can be optimized
+   		if(g_idx < size_eff && s_idx < blockDim.x*batches){
+	    	sh_wgt_queue[s_idx].value = (dev.wgt_queue + offset)[g_idx].value;
+		    sh_wgt_queue[s_idx].k = (dev.wgt_queue + offset)[g_idx].k;
+		    sh_wgt_queue[s_idx].r = (dev.wgt_queue + offset)[g_idx].r;
+		    sh_wgt_queue[s_idx].s = (dev.wgt_queue + offset)[g_idx].s;
+   		}
+    __syncthreads();
+
+    if(y_idx < *act_queue_size){	
+        float act = dev.act_queue[y_idx];
+        int x = dev.act_queue_x[y_idx];
+        int y = dev.act_queue_y[y_idx];
+
+		for(int b = 0; b < batches; b++) {
+			int hop = b << log_x;
+			int sh_idx = threadIdx.x + hop;
+
+			if(x_idx + hop >= size_eff)
+				continue;
+	 		
+            float wgt  = sh_wgt_queue[sh_idx].value;
+            int k = sh_wgt_queue[sh_idx].k;
+            int r = sh_wgt_queue[sh_idx].r;
+            int s = sh_wgt_queue[sh_idx].s;
+
+            float mult = act*wgt;
+        
+		    int w = x-r;
+		    int h = y-s;
 
 		    if(w >= 0 && w < W && h >= 0 && h < H) {
 		        int pos = n_offset + k * k_offset + w * H + h;
@@ -300,8 +371,10 @@ void populate_effectual_activations(int n, int channel, int sx, int sy, int stri
     //check_grid(grid,"populate_effectual_activations");
 
     //TODO:add streams
-    //TODO: launch different kernel for first layer
-    kPopulate_effectual_activations<<<grid,block>>>(n,channel,sx,sy,C,X,Y,stride,dev,act_queue_size);
+	if(stride != 1)
+    	kPopulate_effectual_activations<<<grid,block>>>(n,channel,sx,sy,C,X,Y,stride,dev,act_queue_size);
+	else
+		kPopulate_effectual_activations<<<grid,block>>>(n,channel,C,X,Y,dev,act_queue_size);
     cudaDeviceSynchronize();
 
     #ifndef GLOBAL_TIME
@@ -331,9 +404,13 @@ void computePE(int n, int W, int H, const Layer &layer, int act_queue_size, int 
     int batch_size = block.x*batches;
     dim3 grid((size_eff+batch_size-1)/batch_size,(act_queue_size+block.y-1)/block.y);
     //check_grid(grid,"computePE");
-
-    kComputePE<<<grid,block,0,stream>>>(batches,n_offset,k_offset,W,H,stride,d_act_queue_size,wgt_queue_size,offset,
-            size_eff,dev,d_output_activations);
+	
+	if(stride != 1)
+    	kComputePE<<<grid,block,0,stream>>>(batches,n_offset,k_offset,W,H,stride,d_act_queue_size,wgt_queue_size,offset,
+            	size_eff,dev,d_output_activations);
+	else
+		kComputePE<<<grid,block,0,stream>>>(batches,n_offset,k_offset,W,H,d_act_queue_size,wgt_queue_size,offset,
+            	size_eff,dev,d_output_activations);
     //cudaDeviceSynchronize();
 
     #ifndef GLOBAL_TIME
