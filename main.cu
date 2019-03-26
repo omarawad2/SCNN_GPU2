@@ -477,6 +477,17 @@ int main(int argc, char *argv[]) {
 
     std::vector<Layer> network = read_trace_params(argv[1]);
 
+    //depending on the network allocate different no. of streams
+    std::string net = argv[1];
+    int fc_streams = 0, conv_streams = 0;
+    if(net == "bvlc_alexnet"){
+        fc_streams = 14;
+        conv_streams = 1;
+    } else if(net == "vgg_cnn_s"){
+        fc_streams = 16;
+        conv_streams = 2;
+    }
+
     for(int i = 0; i < network.size(); i++) {
 
     	Layer layer = network[i];
@@ -610,7 +621,7 @@ int main(int argc, char *argv[]) {
         dev.act_queue_size = d_act_queue_size;
 		dev.wgt_queue = d_wgt_queue;
 
-        int nStreams = (layer.type == "fc") ? 14 : 1;
+        int nStreams = (layer.type == "fc") ? fc_streams : conv_streams;
         cudaStream_t *computeTile_streams = (cudaStream_t *) malloc(nStreams * sizeof(cudaStream_t));
         for(int i = 0; i < nStreams; i++)
             cudaStreamCreate(&computeTile_streams[i]);		
@@ -626,10 +637,6 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        for(int i = 0; i< nStreams;i++){
-        cudaStreamDestroy(computeTile_streams[i]);
-        }
-
         relu(N, K, W, H, layer, d_output_activations);
 
         cudaStreamCreate(&streams[2]);
@@ -639,6 +646,11 @@ int main(int argc, char *argv[]) {
 		double timeStampB = getTimeStamp();
 		printf("Layer %s time: %.6f\n",layer.name.c_str(),timeStampB-timeStampA);
 		total_time += timeStampB-timeStampA;
+
+
+        for(int i = 0; i< nStreams;i++){
+        cudaStreamDestroy(computeTile_streams[i]);
+        }
 
         //free GPU resources
         check_error(cudaFree(d_bias),"free device bias");
