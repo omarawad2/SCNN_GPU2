@@ -468,25 +468,39 @@ void computeTile(int n, int ct, int ck, int kc, int Kc, int X, int Y, int K, int
 
 int main(int argc, char *argv[]) {
 
-	if(argc != 2) {
-		printf("Error in number of parameters, usage: %s <network_name>\n",argv[0]);
+	if(argc != 1) {
+		printf("Error in number of parameters, usage: SCNN_GPU then choose the desired network");
 		return -1;
 	}
 
     double total_time = 0.0;
 
-    std::vector<Layer> network = read_trace_params(argv[1]);
+    printf("Choose the required Network number:\n");
+    printf("1) Alexnet\n");
+    printf("2) VGG\n");
 
-    //depending on the network allocate different no. of streams
-    std::string net = argv[1];
-    int fc_streams = 0, conv_streams = 0;
-    if(net == "bvlc_alexnet"){
-        fc_streams = 14;
-        conv_streams = 1;
-    } else if(net == "vgg_cnn_s"){
+    int network_num;
+    std::string net;
+    int fc_streams, conv_streams;
+
+    scanf("%d", &network_num);
+
+    if(network_num == 1){
+         net = "bvlc_alexnet";
+         fc_streams = 14;
+         conv_streams = 1;
+    }
+    else if(network_num == 2){
+        net = "vgg_cnn_s";
         fc_streams = 16;
         conv_streams = 2;
     }
+    else{
+        printf("Error: wrong network number\n");
+        return -1;
+    }
+
+    std::vector<Layer> network = read_trace_params(net);
 
     for(int i = 0; i < network.size(); i++) {
 
