@@ -213,10 +213,11 @@ __global__ void kComputePE(int act_ch_offset, int batches, int n_offset, int k_o
 
     //part before syncthreads can be optimized
         if(g_idx < wgt_queue_size && s_idx < blockDim.x*batches){
-            sh_wgt_queue[s_idx].value = (dev.wgt_queue +offset)[g_idx].value;
-            sh_wgt_queue[s_idx].k = (dev.wgt_queue +offset)[g_idx].k;
-            sh_wgt_queue[s_idx].r = (dev.wgt_queue +offset)[g_idx].r;
-            sh_wgt_queue[s_idx].s = (dev.wgt_queue +offset)[g_idx].s;
+            wgt *tmp = (dev.wgt_queue +offset);
+            sh_wgt_queue[s_idx].value = tmp[g_idx].value;
+            sh_wgt_queue[s_idx].k = tmp[g_idx].k;
+            sh_wgt_queue[s_idx].r = tmp[g_idx].r;
+            sh_wgt_queue[s_idx].s = tmp[g_idx].s;
         }
     __syncthreads();
 
@@ -266,10 +267,11 @@ __global__ void kComputePE(int act_ch_offset, int batches, int n_offset, int k_o
 
     //part before syncthreads can be optimized
    		if(g_idx < wgt_queue_size && s_idx < blockDim.x*batches){
-	    	sh_wgt_queue[s_idx].value = (dev.wgt_queue +offset)[g_idx].value;
-		    sh_wgt_queue[s_idx].k = (dev.wgt_queue +offset)[g_idx].k;
-		    sh_wgt_queue[s_idx].r = (dev.wgt_queue +offset)[g_idx].r;
-		    sh_wgt_queue[s_idx].s = (dev.wgt_queue +offset)[g_idx].s;
+            wgt *tmp = (dev.wgt_queue +offset);
+	    	sh_wgt_queue[s_idx].value = tmp[g_idx].value;
+		    sh_wgt_queue[s_idx].k = tmp[g_idx].k;
+		    sh_wgt_queue[s_idx].r = tmp[g_idx].r;
+		    sh_wgt_queue[s_idx].s = tmp[g_idx].s;
    		}
     __syncthreads();
 
@@ -439,7 +441,7 @@ void computeTile(int n, int C, int Kc, int X, int Y, int K, int W, int H, int R,
             }
             cudaDeviceSynchronize();
 
-            check_error(cudaMemcpy(act_queue_size, dev.act_queue_size, C*sizeof(int), cudaMemcpyDeviceToHost),
+            check_error(cudaMemcpyAsync(act_queue_size, dev.act_queue_size, C*sizeof(int), cudaMemcpyDeviceToHost,streams[0]),
                 "copy activation queue size from device to host");
 
             for(int ch = 0; ch < C; ch++) {
@@ -447,8 +449,8 @@ void computeTile(int n, int C, int Kc, int X, int Y, int K, int W, int H, int R,
                 int wgt_ch_offset = ch*Kc*R*S;
                 int act_ch_offset = ch*X*Y;
 
-                check_error(cudaMemcpy(dev.wgt_queue+wgt_ch_offset, hst.wgt_queue[pos], hst.wgt_queue_size[pos]*sizeof(wgt),
-                    cudaMemcpyHostToDevice), "copy weights queue from host to device");
+                check_error(cudaMemcpyAsync(dev.wgt_queue+wgt_ch_offset, hst.wgt_queue[pos], hst.wgt_queue_size[pos]*sizeof(wgt),
+                    cudaMemcpyHostToDevice, streams[ch]), "copy weights queue from host to device");
                 //cudaDeviceSynchronize();
 
                 computePE(act_ch_offset,n,W,H,layer,*(act_queue_size+ch),hst.wgt_queue_size[pos],dev.act_queue_size+ch,dev,
