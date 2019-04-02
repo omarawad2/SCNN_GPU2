@@ -14,11 +14,17 @@
 //#define VERBOSE
 
 //sweep params
-int bias_xDim, bias_yDim, bias_zDim;
-int relu_xDim;
-int populate_xyDim;
-int compute_fc_batches, compute_conv_batches, compute_xDim, compute_yDim;
-int compute_streams;
+#define bias_xDim 16
+#define bias_yDim 16
+#define bias_zDim 4
+#define relu_xDim 1024
+#define populate_xyDim 32
+#define compute_fc_batches 64
+#define compute_conv_batches 4
+#define compute_xDim 16
+#define compute_yDim 64  // compute_yDim < compute_fc_batches
+//#define compute_streams_flag
+#define compute_streams 16
 
 struct wgt {
 	float value;
@@ -444,16 +450,18 @@ void computeTile(int n, int C, int Kc, int X, int Y, int K, int W, int H, int R,
 
             check_error(cudaMemset(dev.act_queue_size,0, C*sizeof(int)),"set activations queue size to zero");
             
-            //parallelize across activation channels 
+            //parallelize across activation channels
+            int stream_num = 0; 
             for(int ch = 0; ch < C; ch++) {
-                populate_effectual_activations(n,ch,sx,sy,stride,layer,dev,streams[ch]);
+                stream_num = ch % nStreams;
+                populate_effectual_activations(n,ch,sx,sy,stride,layer,dev,streams[stream_num]);
             }
             cudaDeviceSynchronize();
 
             check_error(cudaMemcpyAsync(act_queue_size, dev.act_queue_size, C*sizeof(int), cudaMemcpyDeviceToHost,streams[0]),
                 "copy activation queue size from device to host");
 
-            int stream_num = 0;
+            
             for(int ch = 0; ch < C; ch++) {
                 int pos = ch*stride*stride + sx*stride + sy;
                 int wgt_ch_offset = ch*Kc*R*S;
@@ -478,27 +486,16 @@ void computeTile(int n, int C, int Kc, int X, int Y, int K, int W, int H, int R,
 int main(int argc, char *argv[]) {
 
 
-	if(argc != 12) {
+	if(argc != 2) {
 		printf("Error in number of parameters, usage: %s <network_name>\n",argv[0]);
 		return -1;
 	}
 
     double total_time = 0.0;
 
+    int n_streams;
+
     std::vector<Layer> network = read_trace_params(argv[1]);
-
-    //sweep params
-    bias_xDim = std::atoi(argv[2]);
-    bias_yDim = std::atoi(argv[3]);
-    bias_zDim = std::atoi(argv[4]);
-    relu_xDim = std::atoi(argv[5]);
-    populate_xyDim = std::atoi(argv[6]);
-    compute_fc_batches = std::atoi(argv[7]);
-    compute_conv_batches = std::atoi(argv[8]);
-    compute_xDim = std::atoi(argv[9]);
-    compute_yDim = compute_fc_batches;//std::atoi(argv[10]);
-    compute_streams = std::atoi(argv[11]);
-
 
 /*
     //depending on the network allocate different no. of streams
@@ -615,7 +612,15 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
 
-    	double timeStampA = getTimeStamp();
+
+        #ifdef compute_streams_flag
+            assert(compute_streams < C); 
+            n_streams = compute_streams;
+        #else
+            n_streams = C;
+        #endif
+
+    	//double timeStampA = getTimeStamp();
 
         cudaStream_t streams[3];
         cudaStreamCreate(&streams[0]);
@@ -642,7 +647,7 @@ int main(int argc, char *argv[]) {
 
         int *d_act_queue_size;
         check_error(cudaMalloc((void**) &d_act_queue_size, C*sizeof(int)),"allocate activations queue size");
-     
+        double timeStampA = getTimeStamp();
 
 		//copy to struct
 		device_data dev;
@@ -653,7 +658,7 @@ int main(int argc, char *argv[]) {
         dev.act_queue_size = d_act_queue_size;
 		dev.wgt_queue = d_wgt_queue;
 
-        int nStreams = compute_streams;//C;//(layer.type == "fc") ? fc_streams : conv_streams;
+        int nStreams = n_streams;//C;//(layer.type == "fc") ? fc_streams : conv_streams;
         cudaStream_t *computeTile_streams = (cudaStream_t *) malloc(nStreams * sizeof(cudaStream_t));
         for(int i = 0; i < nStreams; i++)
             cudaStreamCreate(&computeTile_streams[i]);		
