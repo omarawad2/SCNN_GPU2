@@ -7,9 +7,18 @@
 #include <stdlib.h>
 #include <sstream>
 #include <fstream>
+#include <string> 
+#include<iostream>
 
 #define GLOBAL_TIME
 //#define VERBOSE
+
+//sweep params
+int bias_xDim, bias_yDim, bias_zDim;
+int relu_xDim;
+int populate_xyDim;
+int compute_fc_batches, compute_conv_batches, compute_xDim, compute_yDim;
+int compute_streams;
 
 struct wgt {
 	float value;
@@ -315,7 +324,7 @@ void addBias(int N, int K, int W, int H, const Layer &layer, float *d_output_act
     double timeStampA = getTimeStamp();
     #endif
 
-    dim3 block(16, 16, 4);
+    dim3 block(bias_xDim, bias_yDim, bias_zDim);
     dim3 grid((H+block.x-1)/block.x,(W+block.y-1)/block.y,(K+block.z-1)/block.z);
     //check_grid(grid,"addBias");
 
@@ -338,7 +347,7 @@ void relu(int N, int K, int W, int H, const Layer &layer, float *d_output_activa
     double timeStampA = getTimeStamp();
     #endif
 
-    dim3 block(1024, 1);
+    dim3 block(relu_xDim, 1);
     dim3 grid((K*W*H+block.x-1)/block.x,1);
     
     //TODO: we can stream on the channels instead
@@ -372,7 +381,7 @@ void populate_effectual_activations(int n, int channel, int sx, int sy, int stri
 
     int *act_queue_size = dev.act_queue_size+channel;
 
-    dim3 block(32, 32);
+    dim3 block(populate_xyDim, populate_xyDim);
     dim3 grid((Y+block.x-1)/block.x,(X+block.y-1)/block.y);
     //check_grid(grid,"populate_effectual_activations");
 
@@ -402,10 +411,10 @@ void computePE(int act_ch_offset, int n, int W, int H, const Layer &layer, int a
     int k_offset = W*H;
     int n_offset = n*K*k_offset;
     //TODO can be improved
-    int batches = (layer.type == "fc") ? 64 : 4;
+    int batches = (layer.type == "fc") ? compute_fc_batches : compute_conv_batches;
 
     //block size might be different for conv and fc
-    dim3 block(16, 64);
+    dim3 block(compute_xDim, compute_yDim);
     int batch_size = block.x*batches;
     dim3 grid((wgt_queue_size+batch_size-1)/batch_size,(act_queue_size+block.y-1)/block.y);
     //check_grid(grid,"computePE");
@@ -444,17 +453,20 @@ void computeTile(int n, int C, int Kc, int X, int Y, int K, int W, int H, int R,
             check_error(cudaMemcpyAsync(act_queue_size, dev.act_queue_size, C*sizeof(int), cudaMemcpyDeviceToHost,streams[0]),
                 "copy activation queue size from device to host");
 
+            int stream_num = 0;
             for(int ch = 0; ch < C; ch++) {
                 int pos = ch*stride*stride + sx*stride + sy;
                 int wgt_ch_offset = ch*Kc*R*S;
                 int act_ch_offset = ch*X*Y;
 
+                stream_num = ch % nStreams;
+
                 check_error(cudaMemcpyAsync(dev.wgt_queue+wgt_ch_offset, hst.wgt_queue[pos], hst.wgt_queue_size[pos]*sizeof(wgt),
-                    cudaMemcpyHostToDevice, streams[ch]), "copy weights queue from host to device");
+                    cudaMemcpyHostToDevice, streams[stream_num]), "copy weights queue from host to device");
                 //cudaDeviceSynchronize();
 
                 computePE(act_ch_offset,n,W,H,layer,*(act_queue_size+ch),hst.wgt_queue_size[pos],dev.act_queue_size+ch,dev,
-                    d_output_activations,streams[ch],wgt_ch_offset);
+                    d_output_activations,streams[stream_num],wgt_ch_offset);
             }
             cudaDeviceSynchronize();
         }
@@ -465,7 +477,8 @@ void computeTile(int n, int C, int Kc, int X, int Y, int K, int W, int H, int R,
 
 int main(int argc, char *argv[]) {
 
-	if(argc != 2) {
+
+	if(argc != 12) {
 		printf("Error in number of parameters, usage: %s <network_name>\n",argv[0]);
 		return -1;
 	}
@@ -473,6 +486,20 @@ int main(int argc, char *argv[]) {
     double total_time = 0.0;
 
     std::vector<Layer> network = read_trace_params(argv[1]);
+
+    //sweep params
+    bias_xDim = std::atoi(argv[2]);
+    bias_yDim = std::atoi(argv[3]);
+    bias_zDim = std::atoi(argv[4]);
+    relu_xDim = std::atoi(argv[5]);
+    populate_xyDim = std::atoi(argv[6]);
+    compute_fc_batches = std::atoi(argv[7]);
+    compute_conv_batches = std::atoi(argv[8]);
+    compute_xDim = std::atoi(argv[9]);
+    compute_yDim = compute_fc_batches;//std::atoi(argv[10]);
+    compute_streams = std::atoi(argv[11]);
+
+
 /*
     //depending on the network allocate different no. of streams
     std::string net = argv[1];
@@ -626,7 +653,7 @@ int main(int argc, char *argv[]) {
         dev.act_queue_size = d_act_queue_size;
 		dev.wgt_queue = d_wgt_queue;
 
-        int nStreams = C;//(layer.type == "fc") ? fc_streams : conv_streams;
+        int nStreams = compute_streams;//C;//(layer.type == "fc") ? fc_streams : conv_streams;
         cudaStream_t *computeTile_streams = (cudaStream_t *) malloc(nStreams * sizeof(cudaStream_t));
         for(int i = 0; i < nStreams; i++)
             cudaStreamCreate(&computeTile_streams[i]);		
