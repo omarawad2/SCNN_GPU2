@@ -23,8 +23,9 @@
 #define compute_conv_batches 4
 #define compute_xDim 16
 #define compute_yDim 64  // compute_yDim < compute_fc_batches
-//#define compute_streams_flag
-#define compute_streams 16
+#define compute_streams_flag
+#define compute_streams_fc 9
+#define compute_streams_conv 4
 
 struct wgt {
 	float value;
@@ -468,9 +469,10 @@ void computeTile(int n, int C, int Kc, int X, int Y, int K, int W, int H, int R,
                 int act_ch_offset = ch*X*Y;
 
                 stream_num = ch % nStreams;
-
+                
                 check_error(cudaMemcpyAsync(dev.wgt_queue+wgt_ch_offset, hst.wgt_queue[pos], hst.wgt_queue_size[pos]*sizeof(wgt),
                     cudaMemcpyHostToDevice, streams[stream_num]), "copy weights queue from host to device");
+                
                 //cudaDeviceSynchronize();
 
                 computePE(act_ch_offset,n,W,H,layer,*(act_queue_size+ch),hst.wgt_queue_size[pos],dev.act_queue_size+ch,dev,
@@ -614,8 +616,8 @@ int main(int argc, char *argv[]) {
 
 
         #ifdef compute_streams_flag
-            assert(compute_streams < C); 
-            n_streams = compute_streams;
+            //assert(compute_streams > C); 
+            n_streams = (layer.type == "fc")? compute_streams_fc : compute_streams_conv;
         #else
             n_streams = C;
         #endif
@@ -709,7 +711,7 @@ int main(int argc, char *argv[]) {
         	}
         }
 
-        check_values(layer,h_output_activations);
+       // check_values(layer,h_output_activations);
         cudaFreeHost(h_output_activations);
         cudaFreeHost(act_queue_size);
     }
