@@ -628,8 +628,6 @@ int main(int argc, char *argv[]) {
         cudaStreamCreate(&streams[0]);
         float *d_bias = host2Dev(layer.getMaxIndex("bias"), layer.bias,"allocate device bias", streams[0]);
 
-        addBias(N, K, W, H, layer, d_output_activations, d_bias);
-
         ////////core compute/////////////
         // Allocate space for the queues on device (allocate once and reuse)
         float *d_act_queue;
@@ -650,6 +648,8 @@ int main(int argc, char *argv[]) {
         int *d_act_queue_size;
         check_error(cudaMalloc((void**) &d_act_queue_size, C*sizeof(int)),"allocate activations queue size");
         double timeStampA = getTimeStamp();
+
+        addBias(N, K, W, H, layer, d_output_activations, d_bias);
 
 		//copy to struct
 		device_data dev;
