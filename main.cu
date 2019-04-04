@@ -1,4 +1,4 @@
-
+	
 #include "Layer.h"
 #include <cuda.h>
 #include <sys/time.h>
@@ -17,10 +17,10 @@
 #define bias_xDim 16
 #define bias_yDim 16
 #define bias_zDim 4
-#define relu_xDim 1024
-#define populate_xyDim 32
+#define relu_xDim 512
+#define populate_xyDim 16
 #define compute_fc_batches 64
-#define compute_conv_batches 4
+#define compute_conv_batches 32
 #define compute_xDim 16
 #define compute_yDim 64  // compute_yDim < compute_fc_batches
 #define compute_streams_flag
