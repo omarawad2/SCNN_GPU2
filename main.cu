@@ -18,13 +18,13 @@
 #define bias_yDim 16
 #define bias_zDim 4
 #define relu_xDim 1024
-#define populate_xyDim 32
+#define populate_xyDim 4
 #define compute_fc_batches 64
 #define compute_conv_batches 4
 #define compute_xDim 16
 #define compute_yDim 64  // compute_yDim < compute_fc_batches
 //#define compute_streams_flag
-#define compute_streams 16
+#define compute_streams 8 
 
 struct wgt {
 	float value;
@@ -59,8 +59,8 @@ void check_path(const std::string &path) {
 std::vector<Layer> read_trace_params(const std::string network_name) {
     std::vector<Layer> network;
 
-	check_path("net_traces/" + network_name);
-    std::string path = "net_traces/" + network_name + "/trace_params.csv";
+	check_path("/nfs/ug/homes-4/e/edoisak/SCNN_GPU/net_traces/" + network_name);
+    std::string path = "/nfs/ug/homes-4/e/edoisak/SCNN_GPU/net_traces/" + network_name + "/trace_params.csv";
     check_path(path);
 
     std::ifstream myfile (path.c_str());
@@ -614,7 +614,7 @@ int main(int argc, char *argv[]) {
 
 
         #ifdef compute_streams_flag
-            assert(compute_streams < C); 
+            //assert(compute_streams < C); 
             n_streams = compute_streams;
         #else
             n_streams = C;
