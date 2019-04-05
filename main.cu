@@ -22,6 +22,18 @@ std::vector<Layer> read_bvlc_alexnet() {
     network.push_back(Layer("bvlc_alexnet","fc8","fc",false,1,0));
     return network;
 }
+std::vector<Layer> read_vgg_cnn_s() {
+    std::vector<Layer> network;
+    network.push_back(Layer("vgg_cnn_s","conv1","conv",true,2,0));
+    network.push_back(Layer("vgg_cnn_s","conv2","conv",true,1,0));
+    network.push_back(Layer("vgg_cnn_s","conv3","conv",true,1,1));
+    network.push_back(Layer("vgg_cnn_s","conv4","conv",true,1,1));
+    network.push_back(Layer("vgg_cnn_s","conv5","conv",true,1,1));
+    network.push_back(Layer("vgg_cnn_s","fc6","fc",true,1,0));
+    network.push_back(Layer("vgg_cnn_s","fc7","fc",true,1,0));
+    network.push_back(Layer("vgg_cnn_s","fc8","fc",false,1,0));
+    return network;
+}
 
 //############################################### Auxiliary functions ##################################################
 double getTimeStamp() {
