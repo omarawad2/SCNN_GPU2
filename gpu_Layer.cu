@@ -218,28 +218,28 @@ void Layer::read_layer() {
     cnpy::NpyArray data_npy;
     uint64_t max_index;
 
-    cnpy::npy_load("net_traces/" + network + "/wgt-" + name + ".npy" , data_npy, wgt_shape);
+    cnpy::npy_load("/nfs/ug/homes-4/e/edoisak/SCNN_GPU/net_traces/" + network + "/wgt-" + name + ".npy" , data_npy, wgt_shape);
     max_index = getMaxIndex("weights");
     check_error(cudaMallocHost((void **) &weights, max_index * sizeof(float)),"allocate layer weights");
 
     for(uint32_t i = 0; i < max_index; i++)
         weights[i] = data_npy.data<float>()[i];
 
-    cnpy::npy_load("net_traces/" + network + "/bias-" + name + ".npy" , data_npy, bias_shape);
+    cnpy::npy_load("/nfs/ug/homes-4/e/edoisak/SCNN_GPU/net_traces/" + network + "/bias-" + name + ".npy" , data_npy, bias_shape);
     max_index = getMaxIndex("bias");
     check_error(cudaMallocHost((void **) &bias, max_index * sizeof(float)),"allocate layer bias");
 
     for(uint32_t i = 0; i < max_index; i++)
         bias[i] = data_npy.data<float>()[i];
 
-    cnpy::npy_load("net_traces/" + network + "/act-" + name + "-0.npy" , data_npy, act_shape);
+    cnpy::npy_load("/nfs/ug/homes-4/e/edoisak/SCNN_GPU/net_traces/" + network + "/act-" + name + "-0.npy" , data_npy, act_shape);
     max_index = getMaxIndex("activations");
     check_error(cudaMallocHost((void **) &activations, max_index * sizeof(float)),"allocate layer activations");
 
     for(uint32_t i = 0; i < max_index; i++)
         activations[i] = data_npy.data<float>()[i];
 
-    cnpy::npy_load("net_traces/" + network + "/act-" + name + "-0-out.npy" , data_npy, out_act_shape);
+    cnpy::npy_load("/nfs/ug/homes-4/e/edoisak/SCNN_GPU/net_traces/" + network + "/act-" + name + "-0-out.npy" , data_npy, out_act_shape);
     max_index = getMaxIndex("output_activations");
     check_error(cudaMallocHost((void **) &output_activations, max_index * sizeof(float)),"allocate layer output activations");
 
