@@ -18,14 +18,14 @@
 #define bias_yDim 16
 #define bias_zDim 4
 #define relu_xDim 512
-#define populate_xyDim 16
+#define populate_xyDim 8
 #define compute_fc_batches 64
-#define compute_conv_batches 32
+#define compute_conv_batches 64
 #define compute_xDim 16
 #define compute_yDim 64  // compute_yDim < compute_fc_batches
 #define compute_streams_flag
-#define compute_streams_fc 9
-#define compute_streams_conv 4
+#define compute_streams_fc 8
+#define compute_streams_conv 8
 
 struct wgt {
 	float value;
