@@ -507,8 +507,8 @@ int main(int argc, char *argv[]) {
 
 	double total_time = 0.0;
 
-    auto network = read_bvlc_alexnet();
-    //auto network = read_vgg_cnn_s();
+    //auto network = read_bvlc_alexnet();
+    auto network = read_vgg_cnn_s();
 
     for(auto layer : network) {
 
